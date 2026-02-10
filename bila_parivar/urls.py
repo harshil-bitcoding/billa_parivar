@@ -40,6 +40,7 @@ urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("parivar.urls")),
     path("", include("notifications.urls")),
+    path("", include("business.urls")),
     path(
         "docs/",
         schema_view.with_ui("swagger", cache_timeout=0),

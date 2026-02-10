@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     "channels",
     "import_export",
     "notifications",
+    "business",
 ]
 
 MIDDLEWARE = [
