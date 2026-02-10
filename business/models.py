@@ -222,7 +222,7 @@ class BusinessOwner(models.Model):
             ("PRIMARY", "Primary Owner"),
             ("PARTNER", "Partner"),
         ],
-        default="Primary Owner",
+        default="PARTNER",
         help_text="Ownership role"
     )
 
