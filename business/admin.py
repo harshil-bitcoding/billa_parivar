@@ -1,6 +1,7 @@
 from django.contrib import admin
 from business.models import (
     BusinessCategory,
+    BusinessSubCategory,
     Business,
     BusinessOwner,
     TranslateBusiness,
@@ -11,13 +12,39 @@ from business.models import (
 )
 
 
+# Inline for subcategories
+class BusinessSubCategoryInline(admin.TabularInline):
+    model = BusinessSubCategory
+    extra = 1
+    fields = ('name', 'guj_name', 'icon', 'display_order', 'is_active')
+    ordering = ('display_order', 'name')
+
+
 @admin.register(BusinessCategory)
 class BusinessCategoryAdmin(admin.ModelAdmin):
-    list_display = ['id', 'name', 'guj_name', 'icon', 'is_active', 'display_order']
+    list_display = ['id', 'name', 'guj_name', 'icon', 'is_active', 'display_order', 'subcategory_count']
     list_filter = ['is_active']
     search_fields = ['name', 'guj_name']
     ordering = ['display_order', 'name']
     list_editable = ['display_order', 'is_active']
+    inlines = [BusinessSubCategoryInline]
+    
+    def subcategory_count(self, obj):
+        return obj.subcategories.count()
+    subcategory_count.short_description = 'Subcategories'
+
+
+@admin.register(BusinessSubCategory)
+class BusinessSubCategoryAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'category', 'guj_name', 'icon', 'display_order', 'is_active', 'business_count']
+    list_filter = ['category', 'is_active']
+    search_fields = ['name', 'guj_name', 'category__name']
+    ordering = ['category', 'display_order', 'name']
+    list_editable = ['display_order', 'is_active']
+    
+    def business_count(self, obj):
+        return obj.businesses.filter(is_active=True, is_deleted=False).count()
+    business_count.short_description = 'Businesses'
 
 
 class BusinessOwnerInline(admin.TabularInline):
@@ -61,6 +88,7 @@ class BusinessAdmin(admin.ModelAdmin):
         'id',
         'title',
         'category',
+        'subcategory',
         'village',
         'primary_owner_name',
         'is_verified',
@@ -71,6 +99,7 @@ class BusinessAdmin(admin.ModelAdmin):
     ]
     list_filter = [
         'category',
+        'subcategory',
         'is_verified',
         'is_active',
         'is_deleted',
@@ -84,7 +113,7 @@ class BusinessAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'description', 'category', 'logo', 'keywords')
+            'fields': ('title', 'description', 'category', 'subcategory', 'logo', 'keywords')
         }),
         ('Location', {
             'fields': ('village', 'taluka', 'district', 'state')
