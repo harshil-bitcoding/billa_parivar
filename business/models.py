@@ -29,6 +29,58 @@ class BusinessCategory(models.Model):
         return self.name
 
 
+class BusinessSubCategory(models.Model):
+    """
+    Subcategories under main business categories
+    Example: Category "Food & Beverages" → Subcategories: "Restaurant", "Cafe", "Bakery"
+    """
+    id = models.AutoField(primary_key=True)
+    category = models.ForeignKey(
+        BusinessCategory,
+        on_delete=models.CASCADE,
+        related_name='subcategories',
+        help_text="Parent category"
+    )
+    name = models.CharField(
+        max_length=100,
+        help_text="Subcategory name (English)"
+    )
+    guj_name = models.CharField(
+        max_length=100,
+        blank=True,
+        null=True,
+        help_text="Subcategory name (Gujarati)"
+    )
+    icon = models.CharField(
+        max_length=50,
+        blank=True,
+        null=True,
+        help_text="Icon key for frontend"
+    )
+    is_active = models.BooleanField(
+        default=True,
+        help_text="Enable/disable subcategory"
+    )
+    display_order = models.IntegerField(
+        default=0,
+        help_text="Sort order within category"
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    class Meta:
+        ordering = ['category', 'display_order', 'name']
+        verbose_name_plural = "Business Subcategories"
+        unique_together = ('category', 'name')
+        indexes = [
+            models.Index(fields=['category', 'is_active']),
+        ]
+    
+    def __str__(self):
+        return f"{self.category.name} → {self.name}"
+
+
+
 class Business(models.Model):
     """
     Core business listing model
@@ -55,6 +107,17 @@ class Business(models.Model):
         related_name='businesses',
         help_text="Business type/category"
     )
+    
+    # Subcategory (optional, for hierarchical categorization)
+    subcategory = models.ForeignKey(
+        'BusinessSubCategory',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='businesses',
+        help_text="Business subcategory (optional)"
+    )
+
     
     # Business Logo/Icon
     logo = models.ImageField(
@@ -181,7 +244,7 @@ class Business(models.Model):
         if self.contact_mobile or self.contact_whatsapp: score += 15
         if self.village: score += 10
         if self.logo: score += 5
-        if hasattr(self, 'images') and self.images.exists(): score += 5
+        if hasattr(self, 'images') and self.pk and self.images.exists(): score += 5
         return min(score, 100)
 
 
