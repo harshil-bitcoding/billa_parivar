@@ -221,11 +221,8 @@ class CSVImportService:
                     country_name = cls.clean_val(row[col_map['country']]) if 'country' in col_map else ""
                     int_mob = cls.clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map else ""
                     
-                    if not f_name or not mob1:
-                        err_msg = "Required fields empty: "
-                        if not f_name: err_msg += "First Name "
-                        if not mob1: err_msg += "Mobile 1 "
-                        bug_rows.append(list(row) + [err_msg.strip()])
+                    # Skip only if the entire row is empty (ignore formatting/spacing)
+                    if not any([f_name, m_name, guj_f_name, guj_m_name, s_name, mob1, mob2, dob_raw, country_name, int_mob]):
                         continue
 
                     # Surname Matching (Case-Insensitive)
@@ -262,9 +259,17 @@ class CSVImportService:
                         'flag_show': True
                     }
                     
-                    person, created = Person.objects.update_or_create(
-                        mobile_number1=mob1, is_deleted=False, defaults=person_defaults
-                    )
+                    if mob1:
+                        # Update or create if mobile is present
+                        person, created = Person.objects.update_or_create(
+                            mobile_number1=mob1, is_deleted=False, defaults=person_defaults
+                        )
+                    else:
+                        # Missing mobile: Always create new to avoid merging different people
+                        person_defaults['mobile_number1'] = mob1
+                        person = Person.objects.create(**person_defaults)
+                        created = True
+
                     if created: total_created += 1
                     else: total_updated += 1
                 except Exception as e:
