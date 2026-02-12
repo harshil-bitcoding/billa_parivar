@@ -232,4 +232,9 @@ urlpatterns = [
         V4Views.DistrictStateView.as_view(),
         name="district_state",
     ),
+    path(
+        "api/v4/upload-csv",
+        V4Views.CSVUploadAPIView.as_view(),
+        name="v4-upload-csv",
+    ),
 ]
