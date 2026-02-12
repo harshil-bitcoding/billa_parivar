@@ -109,7 +109,7 @@ class Village(models.Model):
     referral_code = models.CharField(max_length=50, blank=True, null=True)
 
     def __str__(self):
-        return f"{self.name} ({self.taluka.name})"
+        return f"{self.name} ({self.taluka.name} - {self.taluka.district.name})"
 
     class Meta:
         unique_together = ("name", "taluka")

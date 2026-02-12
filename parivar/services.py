@@ -231,11 +231,16 @@ class CSVImportService:
                         surname_obj, _ = cls.resolve_surname(s_name)
 
                     # DOB Normalization
-                    dob = dob_raw
-                    if dob_raw and '-' in str(dob_raw):
-                        parts = str(dob_raw).split('-')
-                        if len(parts) == 3 and len(parts[0]) == 4: # YYYY-MM-DD
-                            dob = f"{parts[2]}-{parts[1]}-{parts[0]}"
+                    dob = str(dob_raw).strip() if dob_raw else ""
+                    if dob:
+                        # Handle YYYY-MM-DD HH:MM:SS (common in Excel/openpyxl)
+                        if ' ' in dob:
+                            dob = dob.split(' ')[0]
+                        
+                        if '-' in dob:
+                            parts = dob.split('-')
+                            if len(parts) == 3 and len(parts[0]) == 4: # YYYY-MM-DD
+                                dob = f"{parts[2]}-{parts[1]}-{parts[0]}"
 
                     # Country Handling
                     c_name = country_name if country_name else "India"

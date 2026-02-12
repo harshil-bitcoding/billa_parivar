@@ -341,9 +341,13 @@ class TalukaAdmin(admin.ModelAdmin):
 
 @admin.register(Village)
 class VillageAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "guj_name", "taluka","referral_code", "is_active", "view_invitation_link"]
+    list_display = ["id", "name", "guj_name", "get_district", "taluka","referral_code", "is_active", "view_invitation_link"]
     list_filter = ["taluka__district", "taluka","referral_code", "is_active"]
     readonly_fields = ["view_invitation_link"]
+
+    def get_district(self, obj):
+        return obj.taluka.district.name
+    get_district.short_description = "District"
 
     def view_invitation_link(self, obj):
         data = {
