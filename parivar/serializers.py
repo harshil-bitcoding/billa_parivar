@@ -40,11 +40,10 @@ class BloodGroupSerializer(serializers.ModelSerializer):
 
 # new serializer added started. 
 class DistrictSerializer(serializers.ModelSerializer):
-    state_name = serializers.ReadOnlyField(source="state.name")
 
     class Meta:
         model = District
-        fields = ["id", "name", "guj_name", "state", "state_name"]
+        fields = ["id", "name", "guj_name"]
 
     def to_representation(self, instance):
         lang = self.context.get("lang", "en")

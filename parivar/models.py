@@ -74,14 +74,14 @@ class District(models.Model):
     id = models.AutoField(primary_key=True)
     name = models.CharField(max_length=100)
     guj_name = models.CharField(max_length=255, blank=True, null=True)
-    state = models.ForeignKey(State, related_name="districts", on_delete=models.CASCADE)
+    # state = models.ForeignKey(State, related_name="districts", on_delete=models.CASCADE)
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
         return self.name
 
     class Meta:
-        unique_together = ("name", "state")
+        unique_together = ("name",)
 
 
 class Taluka(models.Model):
@@ -106,6 +106,7 @@ class Village(models.Model):
     guj_name = models.CharField(max_length=255, blank=True, null=True)
     taluka = models.ForeignKey(Taluka, related_name="villages", on_delete=models.CASCADE)
     is_active = models.BooleanField(default=True)
+    referral_code = models.CharField(max_length=50, blank=True, null=True)
 
     def __str__(self):
         return self.name

@@ -8,9 +8,8 @@ from ..models import (
     Person, District, Taluka, Village, State, 
     TranslatePerson, Surname, ParentChildRelation, Country
 )
-import csv
-import io
-import openpyxl
+from ..services import LocationResolverService, CSVImportService
+from django.conf import settings
 from notifications.models import PersonPlayerId
 from ..serializers import (
     DistrictSerializer,
@@ -25,6 +24,7 @@ import logging
 import os
 from drf_yasg.utils import swagger_auto_schema
 from drf_yasg import openapi
+from drf_yasg import openapi
 
 logger = logging.getLogger(__name__)
 
@@ -34,15 +34,15 @@ class PendingApproveResponseSerializer(serializers.Serializer):
 
 class DistrictDetailView(APIView):
     @swagger_auto_schema(
-        operation_description="Get districts by state ID",
+        operation_description="Get all districts",
         manual_parameters=[
             openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING)
         ],
         responses={200: openapi.Response(description="Districts list", schema=DistrictSerializer(many=True))}
     )
-    def get(self, request, state_id):
+    def get(self, request):
         lang = request.GET.get("lang", "en")
-        districts = District.objects.filter(state_id=state_id, is_active=True)
+        districts = District.objects.filter(is_active=True)
         serializer = DistrictSerializer(districts, many=True, context={"lang": lang})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -493,27 +493,6 @@ class TalukaDistrictView(APIView):
         except Taluka.DoesNotExist:
             return Response({"error": "Taluka not found"}, status=status.HTTP_404_NOT_FOUND)
 
-class DistrictStateView(APIView):
-    authentication_classes = []
-    permission_classes = []
-
-    @swagger_auto_schema(
-        operation_description="Get the parent State for a district",
-        responses={200: openapi.Response(
-            description="Parent State details",
-            schema=StateSerializer
-        ), 404: "District not found"}
-    )
-    def get(self, request, district_id):
-        try:
-            district = District.objects.get(pk=district_id)
-            if not district.is_active:
-                return Response({"message": "Location deactivated. Please contact admin."}, status=status.HTTP_403_FORBIDDEN)
-            serializer = StateSerializer(district.state, context={'lang': request.GET.get("lang", "en")})
-            return Response(serializer.data, status=status.HTTP_200_OK)
-        except District.DoesNotExist:
-            return Response({"error": "District not found"}, status=status.HTTP_404_NOT_FOUND)
-
 from rest_framework.parsers import MultiPartParser, FormParser
 
 class CSVUploadAPIView(APIView):
@@ -534,7 +513,7 @@ class CSVUploadAPIView(APIView):
         return val
 
     @swagger_auto_schema(
-        operation_description="Upload members via CSV/XLSX. Supports Smart Header Detection for family books.",
+        operation_description="Upload members via CSV/XLSX with strict location matching. Supports Dashboard sheet for referral codes.",
         manual_parameters=[
             openapi.Parameter('file', openapi.IN_FORM, type=openapi.TYPE_FILE, description="CSV or XLSX File", required=True)
         ],
@@ -545,179 +524,14 @@ class CSVUploadAPIView(APIView):
         if not uploaded_file:
             return Response({"error": "No file uploaded"}, status=status.HTTP_400_BAD_REQUEST)
 
-        filename = uploaded_file.name.lower()
-        rows = []
-
-        # 1. Extract Rows (CSV or XLSX)
-        if filename.endswith('.xlsx'):
-            try:
-                wb = openpyxl.load_workbook(uploaded_file, data_only=True)
-                sheet = wb.active
-                for row in sheet.iter_rows(values_only=True):
-                    rows.append(list(row))
-            except Exception as e:
-                return Response({"error": f"Failed to read XLSX: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-        else:
-            # Robust CSV Reading
-            try:
-                file_data = uploaded_file.read()
-                try:
-                    decoded = file_data.decode('utf-8-sig')
-                except:
-                    decoded = file_data.decode('latin-1')
-                normalized = "\n".join(decoded.splitlines())
-                reader = csv.reader(io.StringIO(normalized))
-                for row in reader:
-                    rows.append(row)
-            except Exception as e:
-                return Response({"error": f"Failed to read CSV: {str(e)}"}, status=status.HTTP_400_BAD_REQUEST)
-
-        if not rows:
-            return Response({"error": "File is empty"}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 2. Smart Header Detection
-        header_row_idx = -1
-        col_map = {}
+        result = CSVImportService.process_file(uploaded_file, request=request)
         
-        keywords = {
-            'first_name': ['Firstname', 'First name', 'First Name'],
-            'middle_name': ['Father name', 'Father Name'],
-            'surname': ['Surname', 'Sirname'],
-            'dob': ['Birth Date', 'Birt Date', 'DOB'],
-            'mobile1': ['Mobile Number', 'Mobile Number Main', 'Main'],
-            'mobile2': ['Optional', 'Secondary'],
-            'country': ['Country Name', 'Outside India', 'Country'],
-            'int_mobile': ['International Mobile', 'International'],
-            'father_name': ['Name of Father'],
-            'son_name': ['Name of Son'],
-            'gujarati': ['Gujarati', 'In Gujara']
-        }
+        if "error" in result:
+            return Response({"error": result["error"]}, status=status.HTTP_400_BAD_REQUEST)
 
-        for i in range(min(10, len(rows))):
-            row = [str(c).strip() if c else "" for c in rows[i]]
-            # Enhanced Row Detection
-            row_str = " ".join(row)
-            if any(k in row_str for k in ["Firstname", "Surname", "Sirname", "Father name", "Mobile"]):
-                header_row_idx = i
-                for j, cell in enumerate(row):
-                    cell_val = str(cell).strip()
-                    next_cell_val = str(rows[i+1][j]).strip() if i + 1 < len(rows) and j < len(rows[i+1]) and rows[i+1][j] else ""
-                    
-                    combined_col_str = f"{cell_val} {next_cell_val}"
-
-                    if any(k in combined_col_str for k in keywords['first_name']):
-                        if any(k in combined_col_str for k in keywords['gujarati']): col_map['first_name_guj'] = j
-                        else: col_map['first_name'] = j
-                    elif any(k in combined_col_str for k in keywords['middle_name']):
-                        if any(k in combined_col_str for k in keywords['gujarati']): col_map['middle_name_guj'] = j
-                        else: col_map['middle_name'] = j
-                    elif any(k in combined_col_str for k in keywords['surname']): col_map['surname'] = j
-                    elif any(k in combined_col_str for k in keywords['dob']): col_map['dob'] = j
-                    elif any(k in combined_col_str for k in keywords['mobile1']):
-                        if "Main" in combined_col_str: col_map['mobile1'] = j
-                        elif "Optional" in combined_col_str: col_map['mobile2'] = j
-                        elif 'mobile1' not in col_map: col_map['mobile1'] = j
-                    elif any(k in combined_col_str for k in keywords['country']): col_map['country'] = j
-                    elif any(k in combined_col_str for k in keywords['int_mobile']): col_map['int_mobile'] = j
-                    elif any(k in combined_col_str for k in keywords['father_name']): col_map['father_name'] = j
-                    elif any(k in combined_col_str for k in keywords['son_name']): col_map['son_name'] = j
-                break
-
-        if header_row_idx == -1:
-            return Response({"error": "Could not identify header row. Ensure columns like 'Firstname', 'Surname', or 'Mobile' exist."}, status=status.HTTP_400_BAD_REQUEST)
-
-        # 3. Process Data
-        created_count = 0
-        updated_count = 0
-        processed_rows = []
-
-        def clean_val(val):
-            if val is None: return ""
-            val = str(val).strip()
-            if val.startswith('="') and val.endswith('"'): return val[2:-1]
-            if val.startswith("'"): return val[1:]
-            return val
-
-        start_row = header_row_idx + 1
-        if start_row < len(rows):
-            sub_row_str = " ".join([str(x) for x in rows[start_row]]).lower()
-            if any(x in sub_row_str for x in ["english", "gujarati", "main", "optional", "link"]):
-                start_row += 1
-
-        for row in rows[start_row:]:
-            if not any(row): continue
-            
-            f_name = clean_val(row[col_map['first_name']]) if 'first_name' in col_map and len(row) > col_map['first_name'] else ""
-            m_name = clean_val(row[col_map['middle_name']]) if 'middle_name' in col_map and len(row) > col_map['middle_name'] else ""
-            s_name = clean_val(row[col_map['surname']]) if 'surname' in col_map and len(row) > col_map['surname'] else ""
-            mob1 = clean_val(row[col_map['mobile1']]) if 'mobile1' in col_map and len(row) > col_map['mobile1'] else ""
-            mob2 = clean_val(row[col_map['mobile2']]) if 'mobile2' in col_map and len(row) > col_map['mobile2'] else ""
-            dob_raw = clean_val(row[col_map['dob']]) if 'dob' in col_map and len(row) > col_map['dob'] else ""
-            country_name = clean_val(row[col_map['country']]) if 'country' in col_map and len(row) > col_map['country'] else ""
-            int_mob = clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map and len(row) > col_map['int_mobile'] else ""
-            
-            if not f_name or not mob1: continue
-
-            # Create objects
-            surname_obj, _ = Surname.objects.get_or_create(name=s_name) if s_name else (None, False)
-            
-            # Default to India if blank
-            c_name = country_name if country_name else "India"
-            country_obj, _ = Country.objects.get_or_create(name=c_name)
-            if not country_obj: country_obj = Country.objects.filter(id=1).first()
-
-            # Date Normalization (DD-MM-YYYY -> YYYY-MM-DD)
-            dob = ""
-            if dob_raw:
-                dob_str = str(dob_raw).split(' ')[0].replace('/', '-')
-                if '-' in dob_str:
-                    p = dob_str.split('-')
-                    if len(p) == 3:
-                        if len(p[0]) == 4: dob = f"{p[0]}-{p[1]}-{p[2]} 00:00:00.000"
-                        else: dob = f"{p[2]}-{p[1]}-{p[0]} 00:00:00.000"
-
-            person_defaults = {
-                'first_name': f_name, 'middle_name': m_name, 'surname': surname_obj,
-                'date_of_birth': dob, 'mobile_number2': mob2, 'out_of_country': country_obj,
-                'out_of_mobile': int_mob, 'is_registered_directly': True, 'flag_show': True, 'platform': 'smart_import'
-            }
-
-            person, created = Person.objects.update_or_create(
-                mobile_number1=mob1, is_deleted=False, defaults=person_defaults
-            )
-
-            # Handle Translation
-            f_guj = clean_val(row[col_map['first_name_guj']]) if 'first_name_guj' in col_map and len(row) > col_map['first_name_guj'] else ""
-            m_guj = clean_val(row[col_map['middle_name_guj']]) if 'middle_name_guj' in col_map and len(row) > col_map['middle_name_guj'] else ""
-            if f_guj or m_guj:
-                TranslatePerson.objects.update_or_create(
-                    person_id=person, language='guj',
-                    defaults={'first_name': f_guj or f_name, 'middle_name': m_guj or m_name, 'is_deleted': False}
-                )
-
-            if created: created_count += 1
-            else: updated_count += 1
-            processed_rows.append({
-                'person': person,
-                'father_name': clean_val(row[col_map['father_name']]) if 'father_name' in col_map and len(row) > col_map['father_name'] else "",
-                'son_name': clean_val(row[col_map['son_name']]) if 'son_name' in col_map and len(row) > col_map['son_name'] else ""
-            })
-
-        # 4. Relations (High-Precision)
-        for data in processed_rows:
-            child = data['person']
-            for name_field, is_parent in [(data['father_name'], True), (data['son_name'], False)]:
-                if name_field:
-                    p = name_field.split(' ')
-                    q = Person.objects.filter(first_name__iexact=p[0], surname=child.surname, is_deleted=False)
-                    if len(p) > 1: q = q.filter(middle_name__iexact=p[1])
-                    if child.village: q = q.filter(village=child.village)
-                    target = q.exclude(id=child.id).first()
-                    if target:
-                        ParentChildRelation.objects.get_or_create(
-                            parent=(target if is_parent else child),
-                            child=(child if is_parent else target),
-                            defaults={'is_deleted': False}
-                        )
-
-        return Response({"message": f"Processed successfully. Created {created_count} and updated {updated_count} entries.", "created": created_count, "updated": updated_count}, status=status.HTTP_200_OK)
+        return Response({
+            "message": f"Processed successfully. Created {result['created']} and updated {result['updated']} entries.",
+            "created": result['created'],
+            "updated": result['updated'],
+            "bug_file": result['bug_file_url']
+        }, status=status.HTTP_200_OK)

@@ -10,6 +10,11 @@ from django.core import signing
 from django.urls import reverse
 from django.utils.safestring import mark_safe
 from django.conf import settings
+from .services import CSVImportService
+from django.shortcuts import render, redirect
+from django.contrib import messages
+from django.template.response import TemplateResponse
+from django.urls import path
 
 # class PersonAdmin(admin.ModelAdmin):
 
@@ -174,6 +179,7 @@ class TranslatePersonResource(resources.ModelResource):
 @admin.register(Person)
 class PersonAdmin(ImportExportModelAdmin):
     # resource_class = PersonResource
+    change_list_template = "admin/parivar/person/change_list.html"
     form = PersonForm
     list_display = [
         "id",
@@ -253,6 +259,39 @@ class PersonAdmin(ImportExportModelAdmin):
             return translate_person.middle_name
         return "-"
 
+    def get_urls(self):
+        urls = super().get_urls()
+        custom_urls = [
+            path('import-custom-csv/', self.admin_site.admin_view(self.import_custom_csv), name='import-custom-csv'),
+        ]
+        return custom_urls + urls
+
+    def import_custom_csv(self, request):
+        if request.method == "POST":
+            csv_file = request.FILES.get("csv_file")
+            if not csv_file:
+                self.message_user(request, "Please upload a file.", level=messages.ERROR)
+                return redirect("..")
+            
+            result = CSVImportService.process_file(csv_file, request=request)
+            
+            if "error" in result:
+                self.message_user(request, f"Error: {result['error']}", level=messages.ERROR)
+            else:
+                msg = f"Import successful! Created {result['created']} and updated {result['updated']} entries."
+                if result.get('bug_file_url'):
+                    msg += f' <a href="{result["bug_file_url"]}" target="_blank">Download Bug CSV</a>'
+                self.message_user(request, mark_safe(msg), level=messages.SUCCESS)
+            
+            return redirect("..")
+        
+        context = {
+            **self.admin_site.each_context(request),
+            "title": "Import Custom CSV",
+            "opts": self.model._meta,
+        }
+        return TemplateResponse(request, "admin/parivar/person/import_csv.html", context)
+
 @admin.register(TranslatePerson)
 class TranslatePersonAdmin(ImportExportModelAdmin):
     # resource_class = TranslatePersonResource
@@ -290,20 +329,20 @@ class CountryAdmin(admin.ModelAdmin):
 
 @admin.register(District)
 class DistrictAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "guj_name", "state", "is_active"]
-    list_filter = ["state"]
+    list_display = ["id", "name", "guj_name", "is_active"]
+    list_filter = ["name"]
     search_fields = ["name", "guj_name"]
 
 @admin.register(Taluka)
 class TalukaAdmin(admin.ModelAdmin):
     list_display = ["id", "name", "guj_name", "district", "is_active"]
-    list_filter = ["district__state", "district"]
+    list_filter = ["district"]
     search_fields = ["name", "guj_name"]
 
 @admin.register(Village)
 class VillageAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "guj_name", "taluka", "is_active", "view_invitation_link"]
-    list_filter = ["taluka__district__state", "taluka__district", "taluka", "is_active"]
+    list_display = ["id", "name", "guj_name", "taluka","referral_code", "is_active", "view_invitation_link"]
+    list_filter = ["taluka__district", "taluka","referral_code", "is_active"]
     readonly_fields = ["view_invitation_link"]
 
     def view_invitation_link(self, obj):

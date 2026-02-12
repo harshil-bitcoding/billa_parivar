@@ -168,7 +168,7 @@ urlpatterns = [
     ############## v4 Version APIs History ##########################
     path("api/v4/login", V4Views.V4LoginAPI.as_view(), name="login_v4"),
     path(
-        "api/v4/districts/<int:state_id>",
+        "api/v4/districts",
         V4Views.DistrictDetailView.as_view(),
         name="district_detail",
     ),
@@ -227,11 +227,7 @@ urlpatterns = [
         V4Views.TalukaDistrictView.as_view(),
         name="taluka_district",
     ),
-    path(
-        "api/v4/district-state/<int:district_id>/",
-        V4Views.DistrictStateView.as_view(),
-        name="district_state",
-    ),
+
     path(
         "api/v4/upload-csv",
         V4Views.CSVUploadAPIView.as_view(),
