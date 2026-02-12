@@ -117,16 +117,45 @@ class CSVImportService:
         bug_rows = []
         
         # 3. Process Sheets
-        for sheet_name, rows in all_sheets_data.items():
-            if not rows: continue
-            
-            header_row_idx = -1
-            col_map = {}
-            is_dashboard = False
-            
-            if sheet_name.lower() in ['dashbord', 'dashboard']:
-                is_dashboard = True
+        global_village = None
+        global_d_name, global_t_name, global_v_name = "", "", ""
 
+        for s_idx, (sheet_name, rows) in enumerate(all_sheets_data.items()):
+            # 3. Tab Processing Policy
+            if s_idx == 0: # 1st Tab: Dashboard
+                header_row_idx = -1
+                for i in range(min(5, len(rows))):
+                    row_str = " ".join([str(c) for c in rows[i] if c]).lower()
+                    if 'district' in row_str and 'village' in row_str:
+                        header_row_idx = i
+                        break
+                
+                if header_row_idx != -1 and len(rows) > header_row_idx + 1:
+                    data_row = rows[header_row_idx + 1]
+                    # Assuming standard layout for Dashboard: District (0), Taluka (1), Village (2), RefCode (3)
+                    global_d_name = cls.clean_val(data_row[0]) if len(data_row) > 0 else ""
+                    global_t_name = cls.clean_val(data_row[1]) if len(data_row) > 1 else ""
+                    global_v_name = cls.clean_val(data_row[2]) if len(data_row) > 2 else ""
+                    
+                    global_village, loc_status = LocationResolverService.resolve_location(global_d_name, global_t_name, global_v_name)
+                    if not global_village:
+                        return {"error": f"Dashboard Location Error: {loc_status} for {global_d_name}/{global_t_name}/{global_v_name}"}
+                    
+                    # Update Referral Code
+                    ref_code = cls.clean_val(data_row[3]) if len(data_row) > 3 else ""
+                    if ref_code:
+                        global_village.referral_code = ref_code
+                        global_village.save()
+                continue
+
+            if s_idx == 1: # 2nd Tab: Dummy
+                continue
+
+            # 3rd Tab & Onwards: Person Data
+            if not global_village:
+                continue
+
+            col_map = {}
             keywords = {
                 'first_name': ['Firstname (In English)', 'Firstname', 'First name'],
                 'guj_first_name': ['Firstname (In Gujarati)', 'In Gujarati'],
@@ -135,86 +164,51 @@ class CSVImportService:
                 'surname': ['Surname', 'Sirname'],
                 'mobile1': ['Mobile Number Main', 'Main', 'Mobile'],
                 'mobile2': ['Mobile Number (Optional)', 'Secondary', 'Optional'],
-                'district': ['District'],
-                'taluka': ['Taluka'],
-                'village': ['Village'],
-                'referral_code': ['Reference Code', 'Referral Code'],
                 'dob': ['Birth Date', 'Birt Date', 'DOB'],
                 'country': ['Country Name', 'Outside India', 'Country'],
                 'int_mobile': ['International Mobile', 'International'],
-                'gujarati': ['Gujarati', 'In Gujara']
             }
 
-            # Smart Header Detection (Scan first 10 rows)
+            # Smart Header Detection
+            header_row_idx = -1
             for i in range(min(10, len(rows))):
                 row = [str(c).strip() if c else "" for c in rows[i]]
-                row_str = " ".join(row)
-                if any(k.lower() in row_str.lower() for k in ['firstname', 'surname', 'mobile', 'district', 'village']):
+                row_str = " ".join(row).lower()
+                if any(x in row_str for x in ['firstname', 'surname', 'mobile']):
                     header_row_idx = i
                     for j, cell in enumerate(row):
                         cell_val = str(cell).strip()
-                        
-                        # Check cell below for split headers context
                         next_cell_val = ""
                         if i + 1 < len(rows) and j < len(rows[i+1]):
                             next_cell_val = str(rows[i+1][j]).strip() if rows[i+1][j] else ""
-                        
                         combined_col_str = f"{cell_val} {next_cell_val}"
 
                         for key, keys in keywords.items():
                             if any(k.lower() in combined_col_str.lower() for k in keys):
-                                # Special handling for mobile1 vs mobile2
                                 if key == 'mobile1':
                                     if "Main" in combined_col_str: col_map['mobile1'] = j
                                     elif "Optional" in combined_col_str: col_map['mobile2'] = j
                                     elif 'mobile1' not in col_map: col_map['mobile1'] = j
                                 else:
-                                    # Prioritize exact matches if possible
                                     if any(k.lower() == combined_col_str.strip().lower() for k in keys):
                                         col_map[key] = j
                                     elif key not in col_map:
                                         col_map[key] = j
                     break
-            
+
             if header_row_idx == -1:
-                if is_dashboard:
-                    bug_rows.append([sheet_name, "N/A", "Header not detected in Dashboard sheet"])
                 continue
 
-            # Start Row Detection
             start_row = header_row_idx + 1
             if start_row < len(rows):
                 sub_row_str = " ".join([str(x) for x in rows[start_row]]).lower()
-                if any(x in sub_row_str for x in ["english", "gujarati", "main", "optional", "link"]):
+                if any(x in sub_row_str for x in ["english", "gujarati", "main", "optional"]):
                     start_row += 1
 
             for idx, row in enumerate(rows[start_row:]):
                 if not any(row): continue
                 
                 try:
-                    # Location Resolution
-                    d_name = cls.clean_val(row[col_map['district']]) if 'district' in col_map else ""
-                    t_name = cls.clean_val(row[col_map['taluka']]) if 'taluka' in col_map else ""
-                    v_name = cls.clean_val(row[col_map['village']]) if 'village' in col_map else ""
-                    
-                    if not (d_name and t_name and v_name):
-                        bug_rows.append(list(row) + [f"Missing required location columns in sheet {sheet_name}"])
-                        continue
-
-                    village_obj, loc_status = LocationResolverService.resolve_location(d_name, t_name, v_name)
-                    
-                    if not village_obj:
-                        bug_rows.append(list(row) + [loc_status])
-                        continue
-                    
-                    if is_dashboard:
-                        ref_code = cls.clean_val(row[col_map['referral_code']]) if 'referral_code' in col_map else ""
-                        if village_obj and ref_code:
-                            village_obj.referral_code = ref_code
-                            village_obj.save()
-                            total_updated += 1
-                        continue
-                    
                     # Person Data Extraction
                     f_name = cls.clean_val(row[col_map['first_name']]) if 'first_name' in col_map else ""
                     m_name = cls.clean_val(row[col_map['middle_name']]) if 'middle_name' in col_map else ""
@@ -227,16 +221,17 @@ class CSVImportService:
                     country_name = cls.clean_val(row[col_map['country']]) if 'country' in col_map else ""
                     int_mob = cls.clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map else ""
                     
-                    if not f_name or not mob1 or not s_name:
+                    if not f_name or not mob1:
                         err_msg = "Required fields empty: "
                         if not f_name: err_msg += "First Name "
                         if not mob1: err_msg += "Mobile 1 "
-                        if not s_name: err_msg += "Surname "
                         bug_rows.append(list(row) + [err_msg.strip()])
                         continue
 
-                    # Surname Matching Policy (Case-Insensitive Relaxed)
-                    surname_obj, sur_status = cls.resolve_surname(s_name)
+                    # Surname Matching (Case-Insensitive)
+                    surname_obj = None
+                    if s_name:
+                        surname_obj, _ = cls.resolve_surname(s_name)
 
                     # DOB Normalization
                     dob = dob_raw
@@ -248,9 +243,7 @@ class CSVImportService:
                     # Country Handling
                     c_name = country_name if country_name else "India"
                     country_obj, _ = Country.objects.get_or_create(name=c_name)
-                    is_out = False
-                    if country_obj.name.lower() != 'india':
-                        is_out = True
+                    is_out = country_obj.name.lower() != 'india'
 
                     person_defaults = {
                         'first_name': f_name,
@@ -263,9 +256,9 @@ class CSVImportService:
                         'is_out_of_country': is_out,
                         'out_of_country': country_obj,
                         'international_mobile_number': int_mob,
-                        'village': village_obj,
-                        'taluka': village_obj.taluka if village_obj else None,
-                        'district': village_obj.taluka.district if village_obj and village_obj.taluka else None,
+                        'village': global_village,
+                        'taluka': global_village.taluka if global_village else None,
+                        'district': global_village.taluka.district if global_village and global_village.taluka else None,
                         'flag_show': True
                     }
                     
