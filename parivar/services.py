@@ -5,54 +5,40 @@ import openpyxl
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.utils import timezone
-from .models import Surname, Person, District, Taluka, Village
+from .models import Surname, Person, District, Taluka, Village, Country
 
 class LocationResolverService:
     @staticmethod
     def resolve_location(district_name, taluka_name, village_name):
         """
         Resolves hierarchical location (District -> Taluka -> Village).
-        Instead of mismatch blocking, it creates a new record if not found under the parent.
-        returns: (village_obj, status)
-        status: "exact" | "created"
+        Strict policy: Returns None if match not found.
+        Matching is case-insensitive.
         """
         # 1. Resolve District
         district_name = str(district_name).strip()
         district = District.objects.filter(name__iexact=district_name).first()
-        dist_status = "exact"
         if not district:
-            district = District.objects.create(name=district_name)
-            dist_status = "created"
+            return None, f"District Not Found: '{district_name}'"
 
         # 2. Resolve Taluka
         taluka_name = str(taluka_name).strip()
-        # Look for taluka specifically within this district
         taluka = Taluka.objects.filter(name__iexact=taluka_name, district=district).first()
-        tal_status = "exact"
         if not taluka:
-            taluka = Taluka.objects.create(name=taluka_name, district=district)
-            tal_status = "created"
+            return None, f"Taluka Not Found: '{taluka_name}' (in District: {district_name})"
 
         # 3. Resolve Village
         village_name = str(village_name).strip()
-        # Look for village specifically within this taluka
         village = Village.objects.filter(name__iexact=village_name, taluka=taluka).first()
-        vil_status = "exact"
         if not village:
-            village = Village.objects.create(name=village_name, taluka=taluka)
-            vil_status = "created"
+            return None, f"Village Not Found: '{village_name}' (in Taluka: {taluka_name})"
         
-        # Decide final status
-        final_status = "exact"
-        if dist_status == "created" or tal_status == "created" or vil_status == "created":
-            final_status = "created"
-
-        return village, final_status
+        return village, "exact"
 
 class CSVImportService:
     @staticmethod
     def clean_val(val):
-        if not val:
+        if val is None:
             return ""
         val = str(val).strip()
         # Remove Excel formula wrapper ="value"
@@ -63,11 +49,32 @@ class CSVImportService:
             return val[1:]
         return val
 
+    @staticmethod
+    def resolve_surname(name):
+        """
+        Policy:
+        Compare sheet data and DB data in the same case.
+        If a case-insensitive match exists, use it to avoid unnecessary bug files.
+        """
+        name = str(name).strip()
+        if not name:
+            return None, "empty"
+        
+        # Use Case-insensitive match (PostgreSQL iexact handles "same case" comparison)
+        obj = Surname.objects.filter(name__iexact=name).first()
+        if obj:
+            # Match found (e.g. "Patel" for "patel") - use it.
+            return obj, "exact"
+        
+        # No match at all - create new
+        new_surname = Surname.objects.create(name=name)
+        return new_surname, "created"
+
     @classmethod
     def process_file(cls, uploaded_file, request=None):
         """
         Core logic for processing CSV/XLSX files.
-        Returns a dictionary with results.
+        Mirrored from DemoCSVUploadAPIView with added surname policy.
         """
         # 1. Save original file
         fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'uploads', 'original'))
@@ -121,27 +128,52 @@ class CSVImportService:
                 is_dashboard = True
 
             keywords = {
-                'first_name': ['Firstname', 'First name', 'First Name'],
-                'middle_name': ['Father name', 'Father Name'],
+                'first_name': ['Firstname (In English)', 'Firstname', 'First name'],
+                'guj_first_name': ['Firstname (In Gujarati)', 'In Gujarati'],
+                'middle_name': ['Father name (In English)', 'Father name', 'Name of Father'],
+                'guj_middle_name': ['Father name (In Gujarati)', 'Father name Gujarati'],
                 'surname': ['Surname', 'Sirname'],
-                'mobile1': ['Mobile Number', 'Mobile Number Main', 'Main'],
+                'mobile1': ['Mobile Number Main', 'Main', 'Mobile'],
+                'mobile2': ['Mobile Number (Optional)', 'Secondary', 'Optional'],
                 'district': ['District'],
                 'taluka': ['Taluka'],
                 'village': ['Village'],
                 'referral_code': ['Reference Code', 'Referral Code'],
-                'father_name': ['Name of Father'],
-                'son_name': ['Name of Son'],
+                'dob': ['Birth Date', 'Birt Date', 'DOB'],
+                'country': ['Country Name', 'Outside India', 'Country'],
+                'int_mobile': ['International Mobile', 'International'],
+                'gujarati': ['Gujarati', 'In Gujara']
             }
 
+            # Smart Header Detection (Scan first 10 rows)
             for i in range(min(10, len(rows))):
-                row_str = [str(c).strip().lower() if c else "" for c in rows[i]]
-                if any(k.lower() in " ".join(row_str) for k in ['firstname', 'surname', 'mobile', 'district', 'village']):
+                row = [str(c).strip() if c else "" for c in rows[i]]
+                row_str = " ".join(row)
+                if any(k.lower() in row_str.lower() for k in ['firstname', 'surname', 'mobile', 'district', 'village']):
                     header_row_idx = i
-                    for j, cell in enumerate(rows[i]):
-                        cell_val = str(cell).strip() if cell else ""
+                    for j, cell in enumerate(row):
+                        cell_val = str(cell).strip()
+                        
+                        # Check cell below for split headers context
+                        next_cell_val = ""
+                        if i + 1 < len(rows) and j < len(rows[i+1]):
+                            next_cell_val = str(rows[i+1][j]).strip() if rows[i+1][j] else ""
+                        
+                        combined_col_str = f"{cell_val} {next_cell_val}"
+
                         for key, keys in keywords.items():
-                            if any(k.lower() in cell_val.lower() for k in keys):
-                                col_map[key] = j
+                            if any(k.lower() in combined_col_str.lower() for k in keys):
+                                # Special handling for mobile1 vs mobile2
+                                if key == 'mobile1':
+                                    if "Main" in combined_col_str: col_map['mobile1'] = j
+                                    elif "Optional" in combined_col_str: col_map['mobile2'] = j
+                                    elif 'mobile1' not in col_map: col_map['mobile1'] = j
+                                else:
+                                    # Prioritize exact matches if possible
+                                    if any(k.lower() == combined_col_str.strip().lower() for k in keys):
+                                        col_map[key] = j
+                                    elif key not in col_map:
+                                        col_map[key] = j
                     break
             
             if header_row_idx == -1:
@@ -149,20 +181,31 @@ class CSVImportService:
                     bug_rows.append([sheet_name, "N/A", "Header not detected in Dashboard sheet"])
                 continue
 
+            # Start Row Detection
             start_row = header_row_idx + 1
+            if start_row < len(rows):
+                sub_row_str = " ".join([str(x) for x in rows[start_row]]).lower()
+                if any(x in sub_row_str for x in ["english", "gujarati", "main", "optional", "link"]):
+                    start_row += 1
+
             for idx, row in enumerate(rows[start_row:]):
                 if not any(row): continue
                 
                 try:
+                    # Location Resolution
                     d_name = cls.clean_val(row[col_map['district']]) if 'district' in col_map else ""
                     t_name = cls.clean_val(row[col_map['taluka']]) if 'taluka' in col_map else ""
                     v_name = cls.clean_val(row[col_map['village']]) if 'village' in col_map else ""
                     
                     if not (d_name and t_name and v_name):
-                        bug_rows.append(list(row) + [f"Missing location columns in sheet {sheet_name}"])
+                        bug_rows.append(list(row) + [f"Missing required location columns in sheet {sheet_name}"])
                         continue
 
-                    village_obj, _ = LocationResolverService.resolve_location(d_name, t_name, v_name)
+                    village_obj, loc_status = LocationResolverService.resolve_location(d_name, t_name, v_name)
+                    
+                    if not village_obj:
+                        bug_rows.append(list(row) + [loc_status])
+                        continue
                     
                     if is_dashboard:
                         ref_code = cls.clean_val(row[col_map['referral_code']]) if 'referral_code' in col_map else ""
@@ -172,31 +215,93 @@ class CSVImportService:
                             total_updated += 1
                         continue
                     
+                    # Person Data Extraction
                     f_name = cls.clean_val(row[col_map['first_name']]) if 'first_name' in col_map else ""
-                    mob1 = cls.clean_val(row[col_map['mobile1']]) if 'mobile1' in col_map else ""
+                    m_name = cls.clean_val(row[col_map['middle_name']]) if 'middle_name' in col_map else ""
+                    guj_f_name = cls.clean_val(row[col_map['guj_first_name']]) if 'guj_first_name' in col_map else ""
+                    guj_m_name = cls.clean_val(row[col_map['guj_middle_name']]) if 'guj_middle_name' in col_map else ""
                     s_name = cls.clean_val(row[col_map['surname']]) if 'surname' in col_map else ""
+                    mob1 = cls.clean_val(row[col_map['mobile1']]) if 'mobile1' in col_map else ""
+                    mob2 = cls.clean_val(row[col_map['mobile2']]) if 'mobile2' in col_map else ""
+                    dob_raw = cls.clean_val(row[col_map['dob']]) if 'dob' in col_map else ""
+                    country_name = cls.clean_val(row[col_map['country']]) if 'country' in col_map else ""
+                    int_mob = cls.clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map else ""
                     
-                    if f_name and mob1:
-                        surname_obj, _ = Surname.objects.get_or_create(name=s_name) if s_name else (None, False)
-                        
-                        person_defaults = {
-                            'first_name': f_name,
-                            'surname': surname_obj,
-                            'village': village_obj,
-                            'taluka': village_obj.taluka if village_obj else None,
-                            'district': village_obj.taluka.district if village_obj and village_obj.taluka else None,
-                            'flag_show': True
-                        }
-                        
-                        person, created = Person.objects.update_or_create(
-                            mobile_number1=mob1, is_deleted=False, defaults=person_defaults
-                        )
-                        if created: total_created += 1
-                        else: total_updated += 1
+                    if not f_name or not mob1 or not s_name:
+                        err_msg = "Required fields empty: "
+                        if not f_name: err_msg += "First Name "
+                        if not mob1: err_msg += "Mobile 1 "
+                        if not s_name: err_msg += "Surname "
+                        bug_rows.append(list(row) + [err_msg.strip()])
+                        continue
+
+                    # Surname Matching Policy (Case-Insensitive Relaxed)
+                    surname_obj, sur_status = cls.resolve_surname(s_name)
+
+                    # DOB Normalization
+                    dob = dob_raw
+                    if dob_raw and '-' in str(dob_raw):
+                        parts = str(dob_raw).split('-')
+                        if len(parts) == 3 and len(parts[0]) == 4: # YYYY-MM-DD
+                            dob = f"{parts[2]}-{parts[1]}-{parts[0]}"
+
+                    # Country Handling
+                    c_name = country_name if country_name else "India"
+                    country_obj, _ = Country.objects.get_or_create(name=c_name)
+                    is_out = False
+                    if country_obj.name.lower() != 'india':
+                        is_out = True
+
+                    person_defaults = {
+                        'first_name': f_name,
+                        'middle_name': m_name,
+                        'guj_first_name': guj_f_name,
+                        'guj_middle_name': guj_m_name,
+                        'surname': surname_obj,
+                        'date_of_birth': dob,
+                        'mobile_number2': mob2,
+                        'is_out_of_country': is_out,
+                        'out_of_country': country_obj,
+                        'international_mobile_number': int_mob,
+                        'village': village_obj,
+                        'taluka': village_obj.taluka if village_obj else None,
+                        'district': village_obj.taluka.district if village_obj and village_obj.taluka else None,
+                        'flag_show': True
+                    }
+                    
+                    person, created = Person.objects.update_or_create(
+                        mobile_number1=mob1, is_deleted=False, defaults=person_defaults
+                    )
+                    if created: total_created += 1
+                    else: total_updated += 1
                 except Exception as e:
                     bug_rows.append(list(row) + [str(e)])
 
-        # 4. Generate Bug CSV if needed
+        # 4. Process Relations (Name-based) - Mirrored from Demo
+        from .models import ParentChildRelation
+        system_admin = Person.objects.filter(is_super_admin=True).first()
+        if not system_admin:
+            system_admin = Person.objects.filter(is_admin=True).first()
+        
+        if system_admin:
+            # Mirror the Demo logic: check all persons for potential father matches
+            all_persons = Person.objects.filter(is_deleted=False).select_related('surname')
+            for child in all_persons:
+                father_name = child.middle_name
+                if father_name and child.surname:
+                    father = Person.objects.filter(
+                        first_name__iexact=father_name,
+                        surname=child.surname,
+                        is_deleted=False
+                    ).exclude(id=child.id).first()
+                    if father:
+                        ParentChildRelation.objects.get_or_create(
+                            parent=father, 
+                            child=child,
+                            defaults={'created_user': system_admin}
+                        )
+
+        # 5. Generate Bug CSV if needed
         bug_url = None
         if bug_rows:
             bug_fs = FileSystemStorage(location=os.path.join(settings.MEDIA_ROOT, 'uploads', 'bugs'))

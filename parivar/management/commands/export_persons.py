@@ -20,7 +20,8 @@ class Command(BaseCommand):
             'Surname', 'Birth Date (DD-MM-YYYY)', 
             'Mobile Number Main', 'Mobile Number (Optional)', 'Country Name', 
             'International Mobile', 
-            'Name of Father', 'Name of Son'
+            'Name of Father',
+            # 'Name of Son'
         ]
 
         try:
@@ -90,10 +91,10 @@ class Command(BaseCommand):
                                 f"{father_relation.parent.first_name} {father_relation.parent.middle_name or ''}".strip()
                                 if father_relation and father_relation.parent else ''
                             ),
-                            'Name of Son': (
-                                f"{son_relation.child.first_name} {son_relation.child.middle_name or ''}".strip()
-                                if son_relation and son_relation.child else ''
-                            ),
+                            # 'Name of Son': (
+                            #     f"{son_relation.child.first_name} {son_relation.child.middle_name or ''}".strip()
+                            #     if son_relation and son_relation.child else ''
+                            # ),
                         }
                         writer.writerow(row)
 

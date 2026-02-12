@@ -94,7 +94,7 @@ class Taluka(models.Model):
     is_active = models.BooleanField(default=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.district.name})"
 
     class Meta:
         unique_together = ("name", "district")
@@ -109,7 +109,7 @@ class Village(models.Model):
     referral_code = models.CharField(max_length=50, blank=True, null=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} ({self.taluka.name})"
 
     class Meta:
         unique_together = ("name", "taluka")
@@ -142,6 +142,10 @@ class Person(models.Model):
     )
     # new field added ended. 
     out_of_country = models.ForeignKey(Country, on_delete=models.CASCADE, default=1)
+    is_out_of_country = models.BooleanField(default=False)
+    international_mobile_number = models.CharField(max_length=50, blank=True, null=True)
+    guj_first_name = models.CharField(max_length=100, blank=True, null=True)
+    guj_middle_name = models.CharField(max_length=100, blank=True, null=True)
     child_flag = models.BooleanField(default=False)
     flag_show = models.BooleanField(default=False)
     profile = models.ImageField(
