@@ -151,8 +151,16 @@ class CSVImportService:
             if s_idx == 1: # 2nd Tab: Dummy
                 continue
 
-            # 3rd Tab & Onwards: Person Data
+            # 3rd Tab & Onwards: Person Data (Surname Tabs as Master)
             if not global_village:
+                continue
+
+            # Master Tab Rule: Sheet name must exactly match a Surname in DB
+            sheet_surname_obj = Surname.objects.filter(name__iexact=sheet_name.strip()).first()
+            if not sheet_surname_obj:
+                # If the sheet name doesn't match a surname, we skip this sheet as per "Master Tab" policy
+                # Optionally log this as a bug if it's unexpected
+                bug_rows.append([f"Sheet: {sheet_name}", "Skipped: Tab name does not match any Surname in database"])
                 continue
 
             col_map = {}
@@ -221,14 +229,19 @@ class CSVImportService:
                     country_name = cls.clean_val(row[col_map['country']]) if 'country' in col_map else ""
                     int_mob = cls.clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map else ""
                     
-                    # Skip only if the entire row is empty (ignore formatting/spacing)
+                    # 1. Empty Row Check: Skip silently if the row has absolutely no data
+                    # This avoids false "Surname Mismatch" bugs for blank rows.
                     if not any([f_name, m_name, guj_f_name, guj_m_name, s_name, mob1, mob2, dob_raw, country_name, int_mob]):
                         continue
 
-                    # Surname Matching (Case-Insensitive)
-                    surname_obj = None
-                    if s_name:
-                        surname_obj, _ = cls.resolve_surname(s_name)
+                    # 2. Strict Surname Mismatch: Check if row data belongs in this Master Tab
+                    # Rows with data but a different surname are logged to the bug file.
+                    if s_name.strip().lower() != sheet_name.strip().lower():
+                        bug_rows.append(list(row) + [f"Surname mismatch: Sheet is '{sheet_name}', but row says '{s_name}'"])
+                        continue
+
+                    # 3. Proceed with record creation/update (Partial data is allowed if identifying info exists)
+                    surname_obj = sheet_surname_obj
 
                     # DOB Normalization
                     dob = str(dob_raw).strip() if dob_raw else ""
@@ -270,7 +283,7 @@ class CSVImportService:
                             mobile_number1=mob1, is_deleted=False, defaults=person_defaults
                         )
                     else:
-                        # Missing mobile: Always create new to avoid merging different people
+                        # Success case: Mobile missing but name or other identifying info present
                         person_defaults['mobile_number1'] = mob1
                         person = Person.objects.create(**person_defaults)
                         created = True
