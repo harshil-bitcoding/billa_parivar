@@ -41,6 +41,7 @@ urlpatterns = [
     path("", include("parivar.urls")),
     path("", include("notifications.urls")),
     path("", include("business.urls")),
+    path("api/demo/", include("demo.urls")),
     path(
         "docs/",
         schema_view.with_ui("swagger", cache_timeout=0),

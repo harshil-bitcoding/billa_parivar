@@ -55,6 +55,7 @@ INSTALLED_APPS = [
     "import_export",
     "notifications",
     "business",
+    "demo",
 ]
 
 MIDDLEWARE = [
