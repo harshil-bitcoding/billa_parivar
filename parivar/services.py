@@ -190,6 +190,8 @@ class CSVImportService:
                 'dob': ['Birth Date', 'Birt Date', 'DOB'],
                 'country': ['Country Name', 'Outside India', 'Country'],
                 'int_mobile': ['International Mobile', 'International'],
+                'profile': ['Profile', 'Profile Pic', 'Image'],
+                'thumb_profile': ['Thumb profile', 'Thumb', 'Thumbnail'],
             }
 
             # Smart Header Detection
@@ -224,7 +226,7 @@ class CSVImportService:
                         
                         # 2. Other Fields
                         for key, keys in keywords.items():
-                            if key in ['gender', 'mobile1', 'mobile2', 'dob', 'country', 'int_mobile', 'surname']:
+                            if key in ['gender', 'mobile1', 'mobile2', 'dob', 'country', 'int_mobile', 'surname', 'profile', 'thumb_profile']:
                                 if any(k.lower() in combined_col_str for k in keys):
                                     if key == 'mobile1':
                                         if "main" in combined_col_str: col_map['mobile1'] = j
@@ -261,6 +263,8 @@ class CSVImportService:
                     dob_raw = cls.clean_val(row[col_map['dob']]) if 'dob' in col_map else ""
                     country_name = cls.clean_val(row[col_map['country']]) if 'country' in col_map else ""
                     int_mob = cls.clean_val(row[col_map['int_mobile']]) if 'int_mobile' in col_map else ""
+                    profile_path = cls.clean_val(row[col_map['profile']]) if 'profile' in col_map else ""
+                    thumb_profile_path = cls.clean_val(row[col_map['thumb_profile']]) if 'thumb_profile' in col_map else ""
                     
                     # 1. Empty Row Check: Skip silently if the row has absolutely no data
                     # This avoids false "Surname Mismatch" bugs for blank rows.
@@ -312,6 +316,20 @@ class CSVImportService:
                         'flag_show': True,
                         'is_demo': is_demo
                     }
+
+                    if profile_path:
+                        # Clean path if starts with /media/
+                        if profile_path.startswith('/media/'):
+                            profile_path = profile_path.replace('/media/', '', 1)
+                        if profile_path.split('://')[0] not in ['http', 'https']:
+                            person_defaults['profile'] = profile_path
+
+                    if thumb_profile_path:
+                        # Clean path if starts with /media/
+                        if thumb_profile_path.startswith('/media/'):
+                            thumb_profile_path = thumb_profile_path.replace('/media/', '', 1)
+                        if thumb_profile_path.split('://')[0] not in ['http', 'https']:
+                            person_defaults['thumb_profile'] = thumb_profile_path
                     
                     if mob1:
                         # Update or create if mobile is present
