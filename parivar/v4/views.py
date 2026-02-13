@@ -321,6 +321,11 @@ class V4LoginAPI(APIView):
         
         admin_data["person"] = serializer.data
         
+        # Add referral code for non-demo users
+        admin_data["referral_code"] = ""
+        if person.village and hasattr(person.village, 'referral_code') and person.village.referral_code:
+            admin_data["referral_code"] = person.village.referral_code
+        
         admin_user_id = serializer.data.get("id")
         if admin_user_id:
             if is_demo:
