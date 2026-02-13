@@ -40,6 +40,13 @@ class CSVImportService:
     def clean_val(val):
         if val is None:
             return ""
+            
+        # Handle direct float/int from Excel
+        if isinstance(val, (int, float)):
+            # Check if it's effectively an integer (e.g. 123.0)
+            if val == int(val):
+                return str(int(val))
+        
         val = str(val).strip()
         # Remove Excel formula wrapper ="value"
         if val.startswith('="') and val.endswith('"'):
@@ -47,6 +54,14 @@ class CSVImportService:
         # Remove single quote prefix
         if val.startswith("'"):
             return val[1:]
+            
+        # Handle string "123.0" -> "123" (Common CSV/Excel artifact)
+        if val.endswith(".0"):
+            try:
+                return str(int(float(val)))
+            except ValueError:
+                pass
+                
         return val
 
     @staticmethod
