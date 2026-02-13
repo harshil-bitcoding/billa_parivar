@@ -186,7 +186,7 @@ class AdditionalDataByVillageView(APIView):
         total_members = persons.count()
         
         return Response({
-            "total_members": total_members,
+            "total_member": total_members,
             "village_id": village_id
         }, status=status.HTTP_200_OK)
 
@@ -238,7 +238,7 @@ class PersonByVillageView(APIView):
             persons = persons.filter(query).distinct()
 
         serializer = PersonV4Serializer(persons, many=True, context={"lang": lang, "is_demo": is_demo})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        return Response({"data": serializer.data}, status=status.HTTP_200_OK)
 
 class V4LoginAPI(APIView):
     authentication_classes = []
@@ -411,14 +411,18 @@ class PendingApproveDetailViewV4(APIView):
 
         if not pending_users.exists():
             message = "કોઈ બાકી વિનંતી નથી" if lang == "guj" else "No pending requests"
-            return Response({"message": message, "child": [], "others": []}, status=status.HTTP_200_OK)
+            return Response({"message": message, "data": [], "child": [], "others": []}, status=status.HTTP_200_OK)
 
         child_users = pending_users.filter(child_flag=True).order_by("first_name")
         other_users = pending_users.filter(child_flag=False).order_by("first_name")
 
+        child_serialized = PersonV4Serializer(child_users, many=True, context={"lang": lang}).data
+        other_serialized = PersonV4Serializer(other_users, many=True, context={"lang": lang}).data
+
         return Response({
-            "child": PersonV4Serializer(child_users, many=True, context={"lang": lang}).data,
-            "others": PersonV4Serializer(other_users, many=True, context={"lang": lang}).data,
+            "data": child_serialized + other_serialized,
+            "child": child_serialized,
+            "others": other_serialized,
         }, status=status.HTTP_200_OK)
 
 class GenerateVillageInviteLinkView(APIView):
@@ -1789,16 +1793,30 @@ class V4CityDetailView(APIView):
         state = state.state.all()
         lang = request.GET.get("lang", "en")
         serializer = CitySerializer(state, many=True, context={"lang": lang})
-        return Response(serializer.data, status=status.HTTP_200_OK)
+        city_list = serializer.data
+        for index, instance in enumerate(city_list):
+            if instance["id"] == 52:
+                instance["sort_no"] = 0
+            elif instance["id"] == 796:
+                instance["sort_no"] = 1
+            elif instance["id"] == 2:
+                instance["sort_no"] = 2
+            else:
+                instance["sort_no"] = 3
+        city_list = sorted(city_list, key=lambda x: (x["sort_no"], x["name"]))
+        return Response(city_list, status=status.HTTP_200_OK)
 
 
 class V4StateDetailView(APIView):
     authentication_classes = []
 
     def get(self, request):
-        state = State.objects.all()
         lang = request.GET.get("lang", "en")
-        serializer = StateSerializer(state, many=True, context={"lang": lang})
+        if lang == "guj":
+            states = State.objects.all().order_by("guj_name")
+        else:
+            states = State.objects.all().order_by("name")
+        serializer = StateSerializer(states, many=True, context={"lang": lang})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 
