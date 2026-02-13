@@ -21,6 +21,8 @@ class Command(BaseCommand):
             'Mobile Number Main', 'Mobile Number (Optional)', 'Country Name', 
             'International Mobile', 
             'Name of Father',
+            'Profile', 
+            'Thumb profile',
             # 'Name of Son'
         ]
 
@@ -91,6 +93,8 @@ class Command(BaseCommand):
                                 f"{father_relation.parent.first_name} {father_relation.parent.middle_name or ''}".strip()
                                 if father_relation and father_relation.parent else ''
                             ),
+                            'Profile': person.profile.url if person.profile else '',
+                            'Thumb profile': person.thumb_profile.url if person.thumb_profile else '',
                             # 'Name of Son': (
                             #     f"{son_relation.child.first_name} {son_relation.child.middle_name or ''}".strip()
                             #     if son_relation and son_relation.child else ''
