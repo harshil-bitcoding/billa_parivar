@@ -446,7 +446,8 @@ class DemoCSVUploadAPIView(APIView):
             'int_mobile': ['International Mobile', 'International'],
             'father_name': ['Name of Father'],
             'son_name': ['Name of Son'],
-            'gujarati': ['Gujarati', 'In Gujara']
+            'gujarati': ['Gujarati', 'In Gujara', 'In Gujaratio', 'In Gujaration', 'In Gujaral', 'In Gujaralio', 'In Gujaralt', 'In Gujarai'],
+            'english': ['In English', 'In emglish', 'English', 'In rmglish']
         }
 
         for i in range(min(10, len(rows))):
@@ -456,37 +457,41 @@ class DemoCSVUploadAPIView(APIView):
             if any(k in row_str for k in ["Firstname", "Surname", "Sirname", "Father name", "Mobile"]):
                 header_row_idx = i
                 # Found it! Now map columns by checking current AND next row for EACH field
+                current_parent = "" # To hold the main header (e.g., "Firstname" or "Father name")
                 for j, cell in enumerate(row):
-                    cell_val = str(cell).strip()
+                    cell_val = str(cell).strip() if cell else ""
+                    if cell_val:
+                        current_parent = cell_val
                     
-                    # Also look at the cell below (for split headers like 'Firstname' on row 1, 'In English' on row 2)
                     next_cell_val = ""
                     if i + 1 < len(rows) and j < len(rows[i+1]):
                         next_cell_val = str(rows[i+1][j]).strip() if rows[i+1][j] else ""
                     
-                    combined_col_str = f"{cell_val} {next_cell_val}"
+                    combined_col_str = f"{current_parent} {next_cell_val}".strip().lower()
 
-                    # Mapping logic using combined context
-                    if any(k in combined_col_str for k in keywords['first_name']):
-                        if any(k in combined_col_str for k in keywords['gujarati']): col_map['first_name_guj'] = j
-                        else: col_map['first_name'] = j
-                    elif any(k in combined_col_str for k in keywords['middle_name']):
-                        if any(k in combined_col_str for k in keywords['gujarati']): col_map['middle_name_guj'] = j
-                        else: col_map['middle_name'] = j
+                    # 1. Main Name Fields (Context Aware)
+                    if any(k in combined_col_str for k in ['firstname', 'first name']):
+                        if any(k in combined_col_str for k in ['gujarati', 'gujrai', 'gujara', 'gujal', 'gujalt', 'gujarai']):
+                            col_map['first_name_guj'] = j
+                        elif 'english' in combined_col_str or 'first_name' not in col_map:
+                            col_map['first_name'] = j
+                    elif any(k in combined_col_str for k in ['father', 'middle', 'parent']):
+                        if any(k in combined_col_str for k in ['gujarati', 'gujrai', 'gujara', 'gujal', 'gujalt', 'gujarai']):
+                            col_map['middle_name_guj'] = j
+                        elif 'english' in combined_col_str or 'middle_name' not in col_map:
+                            col_map['middle_name'] = j
                     elif any(k in combined_col_str for k in keywords['surname']):
                         col_map['surname'] = j
                     elif any(k in combined_col_str for k in keywords['dob']):
                         col_map['dob'] = j
                     elif any(k in combined_col_str for k in keywords['mobile1']):
-                        if "Main" in combined_col_str: col_map['mobile1'] = j
-                        elif "Optional" in combined_col_str: col_map['mobile2'] = j
+                        if "main" in combined_col_str: col_map['mobile1'] = j
+                        elif "optional" in combined_col_str: col_map['mobile2'] = j
                         elif 'mobile1' not in col_map: col_map['mobile1'] = j
                     elif any(k in combined_col_str for k in keywords['country']):
                         col_map['country'] = j
                     elif any(k in combined_col_str for k in keywords['int_mobile']):
                         col_map['int_mobile'] = j
-                    elif any(k in combined_col_str for k in keywords['father_name']):
-                        col_map['father_name'] = j
                     elif any(k in combined_col_str for k in keywords['son_name']):
                         col_map['son_name'] = j
                 break
@@ -519,6 +524,8 @@ class DemoCSVUploadAPIView(APIView):
             # Extract data using map
             f_name = clean_val(row[col_map['first_name']]) if 'first_name' in col_map and len(row) > col_map['first_name'] else ""
             m_name = clean_val(row[col_map['middle_name']]) if 'middle_name' in col_map and len(row) > col_map['middle_name'] else ""
+            f_name_guj = clean_val(row[col_map['first_name_guj']]) if 'first_name_guj' in col_map and len(row) > col_map['first_name_guj'] else ""
+            m_name_guj = clean_val(row[col_map['middle_name_guj']]) if 'middle_name_guj' in col_map and len(row) > col_map['middle_name_guj'] else ""
             s_name = clean_val(row[col_map['surname']]) if 'surname' in col_map and len(row) > col_map['surname'] else ""
             mob1 = clean_val(row[col_map['mobile1']]) if 'mobile1' in col_map and len(row) > col_map['mobile1'] else ""
             mob2 = clean_val(row[col_map['mobile2']]) if 'mobile2' in col_map and len(row) > col_map['mobile2'] else ""
@@ -549,6 +556,8 @@ class DemoCSVUploadAPIView(APIView):
             person_defaults = {
                 'first_name': f_name,
                 'middle_name': m_name,
+                'guj_first_name': f_name_guj,
+                'guj_middle_name': m_name_guj,
                 'surname': surname_obj,
                 'date_of_birth': dob,
                 'mobile_number2': mob2,

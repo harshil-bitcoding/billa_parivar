@@ -165,10 +165,10 @@ class CSVImportService:
 
             col_map = {}
             keywords = {
-                'first_name': ['Firstname (In English)', 'Firstname', 'First name'],
-                'guj_first_name': ['Firstname (In Gujarati)', 'In Gujarati'],
-                'middle_name': ['Father name (In English)', 'Father name', 'Name of Father'],
-                'guj_middle_name': ['Father name (In Gujarati)', 'Father name Gujarati'],
+                'first_name': ['Firstname (In English)', 'Firstname', 'First name', 'In English', 'In emglish', 'In rmglish'],
+                'guj_first_name': ['Firstname (In Gujarati)', 'In Gujarati', 'In Gujaratio', 'In Gujaration', 'In Gujaral', 'In Gujaralt', 'In Gujarai'],
+                'middle_name': ['Father name (In English)', 'Father name', 'Name of Father', 'In English', 'In emglish', 'In rmglish'],
+                'guj_middle_name': ['Father name (In Gujarati)', 'Father name Gujarati', 'In Gujarati', 'In Gujaratio', 'In Gujaration', 'In Gujaral', 'In Gujaralt', 'In Gujarai'],
                 'surname': ['Surname', 'Sirname'],
                 'mobile1': ['Mobile Number Main', 'Main', 'Mobile'],
                 'mobile2': ['Mobile Number (Optional)', 'Secondary', 'Optional'],
@@ -180,28 +180,46 @@ class CSVImportService:
             # Smart Header Detection
             header_row_idx = -1
             for i in range(min(10, len(rows))):
-                row = [str(c).strip() if c else "" for c in rows[i]]
-                row_str = " ".join(row).lower()
+                row = rows[i]
+                row_str = " ".join([str(c).strip() if c else "" for c in row]).lower()
                 if any(x in row_str for x in ['firstname', 'surname', 'mobile']):
                     header_row_idx = i
+                    current_parent = ""
                     for j, cell in enumerate(row):
-                        cell_val = str(cell).strip()
+                        cell_val = str(cell).strip() if cell else ""
+                        if cell_val:
+                            current_parent = cell_val
+                        
                         next_cell_val = ""
                         if i + 1 < len(rows) and j < len(rows[i+1]):
                             next_cell_val = str(rows[i+1][j]).strip() if rows[i+1][j] else ""
-                        combined_col_str = f"{cell_val} {next_cell_val}"
+                        
+                        combined_col_str = f"{current_parent} {next_cell_val}".strip().lower()
 
+                        if any(k in combined_col_str for k in ['firstname', 'first name']):
+                            if any(k in combined_col_str for k in ['gujarati', 'gujrai', 'gujara', 'gujal', 'gujalt']):
+                                col_map['guj_first_name'] = j
+                            elif 'english' in combined_col_str or 'first_name' not in col_map:
+                                col_map['first_name'] = j
+                        elif any(k in combined_col_str for k in ['father', 'middle', 'parent']):
+                            if any(k in combined_col_str for k in ['gujarati', 'gujrai', 'gujara', 'gujal', 'gujalt']):
+                                col_map['guj_middle_name'] = j
+                            elif 'english' in combined_col_str or 'middle_name' not in col_map:
+                                col_map['middle_name'] = j
+                        
+                        # 2. Other Fields
                         for key, keys in keywords.items():
-                            if any(k.lower() in combined_col_str.lower() for k in keys):
-                                if key == 'mobile1':
-                                    if "Main" in combined_col_str: col_map['mobile1'] = j
-                                    elif "Optional" in combined_col_str: col_map['mobile2'] = j
-                                    elif 'mobile1' not in col_map: col_map['mobile1'] = j
-                                else:
-                                    if any(k.lower() == combined_col_str.strip().lower() for k in keys):
-                                        col_map[key] = j
-                                    elif key not in col_map:
-                                        col_map[key] = j
+                            if key in ['gender', 'mobile1', 'mobile2', 'dob', 'country', 'int_mobile', 'surname']:
+                                if any(k.lower() in combined_col_str for k in keys):
+                                    if key == 'mobile1':
+                                        if "main" in combined_col_str: col_map['mobile1'] = j
+                                        elif "optional" in combined_col_str: col_map['mobile2'] = j
+                                        elif 'mobile1' not in col_map: col_map['mobile1'] = j
+                                    else:
+                                        if any(k.lower() == combined_col_str or k.lower() == next_cell_val.lower() for k in keys):
+                                            col_map[key] = j
+                                        elif key not in col_map:
+                                            col_map[key] = j
                     break
 
             if header_row_idx == -1:
