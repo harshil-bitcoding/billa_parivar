@@ -57,7 +57,7 @@ def getadmincontact(flag_show=False, lang="en", surname=None):
                     is_admin=True,
                     is_deleted=False,
                 )
-        if admin.exists():
+        if admin is not None and admin.exists():
             admin_serializer = PersonGetSerializer(
                 admin, context={"lang": lang}, many=True
             )

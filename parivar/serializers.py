@@ -90,6 +90,7 @@ class PersonV4Serializer(serializers.ModelSerializer):
     district_name = serializers.SerializerMethodField(read_only=True)
     city_name = serializers.SerializerMethodField(read_only=True)
     state_name = serializers.SerializerMethodField(read_only=True)
+    relations = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Person
@@ -128,6 +129,8 @@ class PersonV4Serializer(serializers.ModelSerializer):
             "is_registered_directly",
             "update_field_message",
             "platform",
+            "relations",
+            "is_demo",
         ]
 
     def get_surname_name(self, obj):
@@ -178,6 +181,32 @@ class PersonV4Serializer(serializers.ModelSerializer):
             return obj.state.name
         return None
 
+    def get_relations(self, obj):
+        is_demo = self.context.get("is_demo", False)
+        if is_demo:
+            rel_model = DemoParentChildRelation
+            # If obj is a real Person, we need the DemoPerson counterpart for relations
+            if isinstance(obj, Person):
+                obj = DemoPerson.objects.filter(
+                    Q(mobile_number1=obj.mobile_number1) | Q(mobile_number2=obj.mobile_number1)
+                ).first()
+                if not obj:
+                    return []
+        else:
+            rel_model = ParentChildRelation
+
+        # Fetch relations where the person is either parent or child
+        relations = rel_model.objects.filter(
+            Q(parent=obj) | Q(child=obj)
+        )
+        if hasattr(rel_model, 'is_deleted'):
+            relations = relations.filter(is_deleted=False)
+
+        return [
+            {"id": r.id, "parent": r.parent.id, "child": r.child.id}
+            for r in relations
+        ]
+
     def validate(self, data):
         first_name = data.get("first_name")
         if not first_name:
@@ -217,7 +246,12 @@ class PersonV4Serializer(serializers.ModelSerializer):
                     query = Q(mobile_number1=mobile_number) | Q(mobile_number2=mobile_number)
         
         if query:
-            mobile_exist = Person.objects.filter(query, is_deleted=False)
+            is_demo = self.context.get("is_demo", False)
+            if is_demo:
+                mobile_exist = DemoPerson.objects.filter(query, is_deleted=False)
+            else:
+                mobile_exist = Person.objects.filter(query, is_deleted=False)
+            
             if person_id > 0:
                 mobile_exist = mobile_exist.exclude(id=person_id)
             if mobile_exist.exists():
@@ -233,40 +267,67 @@ class PersonV4Serializer(serializers.ModelSerializer):
         return data
 
     def to_representation(self, instance):
+        is_demo = self.context.get("is_demo", False)
         lang = self.context.get("lang", "en")
-        data = super().to_representation(instance)
+        
+        source_instance = instance
+        if is_demo and isinstance(instance, Person):
+            demo_person = DemoPerson.objects.filter(
+                Q(mobile_number1=instance.mobile_number1) | Q(mobile_number2=instance.mobile_number1)
+            ).first()
+            if demo_person:
+                source_instance = demo_person
+                # Ensure all fields are accessible on DemoPerson to avoid AttributeError during serialization
+                for field_name in self.Meta.fields:
+                    if not hasattr(source_instance, field_name):
+                        if field_name == "profile" or field_name == "thumb_profile":
+                            setattr(source_instance, field_name, getattr(source_instance, "profile_pic", None))
+                        else:
+                            setattr(source_instance, field_name, None)
+
+        data = super().to_representation(source_instance)
         
         # Profile URLs
-        if instance.profile:
-            data["profile"] = instance.profile.url
+        if hasattr(source_instance, 'profile') and source_instance.profile:
+            data["profile"] = source_instance.profile.url
+        elif hasattr(source_instance, 'profile_pic') and source_instance.profile_pic:
+            data["profile"] = source_instance.profile_pic.url
         else:
             data["profile"] = os.getenv("DEFAULT_PROFILE_PATH")
 
-        if instance.thumb_profile:
-            data["thumb_profile"] = instance.thumb_profile.url
+        if hasattr(source_instance, 'thumb_profile') and source_instance.thumb_profile:
+            data["thumb_profile"] = source_instance.thumb_profile.url
+        elif hasattr(source_instance, 'profile_pic') and source_instance.profile_pic:
+            data["thumb_profile"] = source_instance.profile_pic.url
         else:
             data["thumb_profile"] = os.getenv("DEFAULT_PROFILE_PATH")
 
         if lang == "guj":
-            translate_data = TranslatePerson.objects.filter(
-                person_id=instance.id, language="guj", is_deleted=False
-            ).first()
-            if translate_data:
-                data["first_name"] = translate_data.first_name or instance.first_name
-                data["middle_name"] = translate_data.middle_name or instance.middle_name
-                data["address"] = translate_data.address or instance.address
-                data["out_of_address"] = translate_data.out_of_address or instance.out_of_address
+            if is_demo:
+                data["first_name"] = source_instance.guj_first_name or source_instance.first_name
+                data["middle_name"] = source_instance.guj_middle_name or source_instance.middle_name
+                data["address"] = source_instance.address
+                data["out_of_address"] = source_instance.out_of_address
+            else:
+                translate_data = TranslatePerson.objects.filter(
+                    person_id=source_instance.id, language="guj", is_deleted=False
+                ).first()
+                if translate_data:
+                    data["first_name"] = translate_data.first_name or source_instance.first_name
+                    data["middle_name"] = translate_data.middle_name or source_instance.middle_name
+                    data["address"] = translate_data.address or source_instance.address
+                    data["out_of_address"] = translate_data.out_of_address or source_instance.out_of_address
 
-            data["surname_name"] = self.get_surname_name(instance)
-            data["village_name"] = self.get_village_name(instance)
-            data["taluka_name"] = self.get_taluka_name(instance)
-            data["district_name"] = self.get_district_name(instance)
-            data["city_name"] = self.get_city_name(instance)
-            data["state_name"] = self.get_state_name(instance)
+            data["surname_name"] = self.get_surname_name(source_instance)
+            data["village_name"] = self.get_village_name(source_instance)
+            data["taluka_name"] = self.get_taluka_name(source_instance)
+            data["district_name"] = self.get_district_name(source_instance)
+            data["city_name"] = self.get_city_name(source_instance)
+            data["state_name"] = self.get_state_name(source_instance)
         
         # Consistent field naming for surname
-        if instance.surname:
-            data["surname_name"] = self.get_surname_name(instance)
+        if source_instance.surname:
+            data["surname_name"] = self.get_surname_name(source_instance)
             
         return data
 
@@ -711,7 +772,7 @@ class PersonGetSerializer(serializers.ModelSerializer):
     #     return ""
 
     def get_city(self, obj):
-        if obj.city is not None:
+        if hasattr(obj, 'city') and obj.city is not None:
             lang = self.context.get("lang", "en")
             if lang == "guj":
                 return obj.city.guj_name
@@ -719,19 +780,23 @@ class PersonGetSerializer(serializers.ModelSerializer):
         return ""
 
     def get_profile(self, obj):
-        if obj.profile:
+        if hasattr(obj, 'profile') and obj.profile:
             return obj.profile.url
+        elif hasattr(obj, 'profile_pic') and obj.profile_pic:
+            return obj.profile_pic.url
         else:
             return os.getenv("DEFAULT_PROFILE_PATH")
 
     def get_thumb_profile(self, obj):
-        if obj.thumb_profile and obj.thumb_profile != "":
+        if hasattr(obj, 'thumb_profile') and obj.thumb_profile and obj.thumb_profile != "":
             return obj.thumb_profile.url
+        elif hasattr(obj, 'profile_pic') and obj.profile_pic:
+            return obj.profile_pic.url
         else:
             return os.getenv("DEFAULT_PROFILE_PATH")
 
     def get_state(self, obj):
-        if obj.state is not None:
+        if hasattr(obj, 'state') and obj.state is not None:
             lang = self.context.get("lang", "en")
             if lang == "guj":
                 return obj.state.guj_name
@@ -739,7 +804,7 @@ class PersonGetSerializer(serializers.ModelSerializer):
         return ""
 
     def get_out_of_country(self, obj):
-        if obj.out_of_country is not None:
+        if hasattr(obj, 'out_of_country') and obj.out_of_country is not None:
             lang = self.context.get("lang", "en")
             if lang == "guj":
                 return obj.out_of_country.guj_name
@@ -755,33 +820,53 @@ class PersonGetSerializer(serializers.ModelSerializer):
         return ""
 
     def to_representation(self, instance):
+        # Handle missing fields for DemoPerson before serialization
+        if self.context.get("is_demo", False):
+            # Duck-type missing fields to None/Empty to avoid AttributeError in super().to_representation
+            fields_to_mock = [
+                "blood_group", "city", "out_of_mobile", "password", 
+                "is_same_as_son_address", "is_same_as_father_address", 
+                "status", "is_super_uper", "deleted_by", 
+                "is_show_old_contact", "is_deleted"
+            ]
+            for field in fields_to_mock:
+                if not hasattr(instance, field):
+                   setattr(instance, field, None)
+
         representation = super().to_representation(instance)
         lang = self.context.get("lang", "en")
+        is_demo = self.context.get("is_demo", False)
+        
         if lang == "guj":
-            translate_data = TranslatePerson.objects.filter(
-                person_id=int(instance.id), is_deleted=False
-            ).first()
-            if translate_data:
-                representation["first_name"] = (
-                    translate_data.first_name
-                    if translate_data.first_name
-                    else instance.first_name
-                )
-                representation["middle_name"] = (
-                    translate_data.middle_name
-                    if translate_data.middle_name
-                    else instance.middle_name
-                )
-                representation["address"] = (
-                    translate_data.address
-                    if translate_data.address
-                    else instance.address
-                )
-                representation["out_of_address"] = (
-                    translate_data.out_of_address
-                    if translate_data.out_of_address
-                    else instance.out_of_address
-                )
+            if is_demo:
+                 representation["first_name"] = instance.guj_first_name or instance.first_name
+                 representation["middle_name"] = instance.guj_middle_name or instance.middle_name
+                 # DemoPerson has no guj_address, keep default
+            else:
+                translate_data = TranslatePerson.objects.filter(
+                    person_id=int(instance.id), is_deleted=False
+                ).first()
+                if translate_data:
+                    representation["first_name"] = (
+                        translate_data.first_name
+                        if translate_data.first_name
+                        else instance.first_name
+                    )
+                    representation["middle_name"] = (
+                        translate_data.middle_name
+                        if translate_data.middle_name
+                        else instance.middle_name
+                    )
+                    representation["address"] = (
+                        translate_data.address
+                        if translate_data.address
+                        else instance.address
+                    )
+                    representation["out_of_address"] = (
+                        translate_data.out_of_address
+                        if translate_data.out_of_address
+                        else instance.out_of_address
+                    )
         return representation
 
 class PersonGetSerializer2(PersonGetSerializer):
@@ -962,7 +1047,11 @@ class GetParentChildRelationSerializer(serializers.ModelSerializer):
 
     def get_created_user(self, obj):
         lang = self.context.get("lang", "en")
+        is_demo = self.context.get("is_demo", False)
         if lang == "guj":
+            if is_demo:
+                return (obj.created_user.guj_first_name or obj.created_user.first_name) + " " + (obj.created_user.guj_middle_name or obj.created_user.middle_name)
+            
             translate_data = TranslatePerson.objects.filter(
                 person_id=int(obj.created_user.id), is_deleted=False
             ).first()

@@ -5,7 +5,7 @@ import openpyxl
 from django.conf import settings
 from django.core.files.storage import FileSystemStorage
 from django.utils import timezone
-from .models import Surname, Person, District, Taluka, Village, Country
+from .models import Surname, Person, District, Taluka, Village, Country, DemoPerson, DemoParentChildRelation, ParentChildRelation
 
 class LocationResolverService:
     @staticmethod
@@ -71,7 +71,7 @@ class CSVImportService:
         return new_surname, "created"
 
     @classmethod
-    def process_file(cls, uploaded_file, request=None):
+    def process_file(cls, uploaded_file, request=None, is_demo=False):
         """
         Core logic for processing CSV/XLSX files.
         Mirrored from DemoCSVUploadAPIView with added surname policy.
@@ -278,6 +278,8 @@ class CSVImportService:
                     country_obj, _ = Country.objects.get_or_create(name=c_name)
                     is_out = country_obj.name.lower() != 'india'
 
+                    person_model = DemoPerson if is_demo else Person
+
                     person_defaults = {
                         'first_name': f_name,
                         'middle_name': m_name,
@@ -292,18 +294,19 @@ class CSVImportService:
                         'village': global_village,
                         'taluka': global_village.taluka if global_village else None,
                         'district': global_village.taluka.district if global_village and global_village.taluka else None,
-                        'flag_show': True
+                        'flag_show': True,
+                        'is_demo': is_demo
                     }
                     
                     if mob1:
                         # Update or create if mobile is present
-                        person, created = Person.objects.update_or_create(
+                        person, created = person_model.objects.update_or_create(
                             mobile_number1=mob1, is_deleted=False, defaults=person_defaults
                         )
                     else:
                         # Success case: Mobile missing but name or other identifying info present
                         person_defaults['mobile_number1'] = mob1
-                        person = Person.objects.create(**person_defaults)
+                        person = person_model.objects.create(**person_defaults)
                         created = True
 
                     if created: total_created += 1
@@ -312,24 +315,26 @@ class CSVImportService:
                     bug_rows.append(list(row) + [str(e)])
 
         # 4. Process Relations (Name-based) - Mirrored from Demo
-        from .models import ParentChildRelation
-        system_admin = Person.objects.filter(is_super_admin=True).first()
+        person_model = DemoPerson if is_demo else Person
+        rel_model = DemoParentChildRelation if is_demo else ParentChildRelation
+
+        system_admin = person_model.objects.filter(is_super_admin=True, is_deleted=False).first()
         if not system_admin:
-            system_admin = Person.objects.filter(is_admin=True).first()
+            system_admin = person_model.objects.filter(is_admin=True, is_deleted=False).first()
         
         if system_admin:
             # Mirror the Demo logic: check all persons for potential father matches
-            all_persons = Person.objects.filter(is_deleted=False).select_related('surname')
+            all_persons = person_model.objects.filter(is_deleted=False).select_related('surname')
             for child in all_persons:
                 father_name = child.middle_name
                 if father_name and child.surname:
-                    father = Person.objects.filter(
+                    father = person_model.objects.filter(
                         first_name__iexact=father_name,
                         surname=child.surname,
                         is_deleted=False
                     ).exclude(id=child.id).first()
                     if father:
-                        ParentChildRelation.objects.get_or_create(
+                        rel_model.objects.get_or_create(
                             parent=father, 
                             child=child,
                             defaults={'created_user': system_admin}

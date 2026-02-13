@@ -269,11 +269,12 @@ class PersonAdmin(ImportExportModelAdmin):
     def import_custom_csv(self, request):
         if request.method == "POST":
             csv_file = request.FILES.get("csv_file")
+            is_demo = request.POST.get("is_demo") == "on"
             if not csv_file:
                 self.message_user(request, "Please upload a file.", level=messages.ERROR)
                 return redirect("..")
             
-            result = CSVImportService.process_file(csv_file, request=request)
+            result = CSVImportService.process_file(csv_file, request=request, is_demo=is_demo)
             
             if "error" in result:
                 self.message_user(request, f"Error: {result['error']}", level=messages.ERROR)
@@ -377,6 +378,17 @@ class RandomBannerAdmin(admin.ModelAdmin):
         if RandomBanner.objects.count() == 1:
             return False
         return True
+
+@admin.register(DemoPerson)
+class DemoPersonAdmin(admin.ModelAdmin):
+    list_display = ["id", "first_name", "guj_first_name", "middle_name", "guj_middle_name", "surname", "mobile_number1", "village", "is_admin", "flag_show", "is_deleted"]
+    list_filter = ["surname", "village", "is_admin", "flag_show", "is_deleted"]
+    search_fields = ["id", "first_name", "middle_name", "mobile_number1", "surname__name"]
+
+@admin.register(DemoParentChildRelation)
+class DemoParentChildRelationAdmin(admin.ModelAdmin):
+    list_display = ["id", "parent", "child", "created_user", "is_deleted"]
+    search_fields = ["parent__first_name", "child__first_name"]
 
 @admin.register(PersonUpdateLog)
 class PersonUpdateLogAdmin(admin.ModelAdmin):

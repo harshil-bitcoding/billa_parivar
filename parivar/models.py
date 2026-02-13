@@ -148,6 +148,7 @@ class Person(models.Model):
     guj_middle_name = models.CharField(max_length=100, blank=True, null=True)
     child_flag = models.BooleanField(default=False)
     flag_show = models.BooleanField(default=False)
+    is_demo = models.BooleanField(default=False)
     profile = models.ImageField(
         upload_to="profiles/", blank=True, null=True, max_length=512
     )
@@ -306,3 +307,120 @@ class PersonUpdateLog(models.Model):
     )
     is_deleted = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
+
+# Demo Table
+
+class DemoPerson(models.Model):
+    id = models.AutoField(primary_key=True)
+    first_name = models.CharField(max_length=100, blank=True, null=True)
+    middle_name = models.CharField(max_length=100, blank=True, null=True)
+    surname = models.ForeignKey(
+        Surname, on_delete=models.CASCADE, blank=True, null=True
+    )
+    date_of_birth = models.CharField(max_length=100, null=True, blank=True)
+    mobile_number1 = models.CharField(max_length=12, blank=True, null=True)
+    mobile_number2 = models.CharField(max_length=12, blank=True, null=True)
+    address = models.CharField(max_length=255, blank=True, null=True)
+    out_of_address = models.CharField(max_length=500, blank=True, null=True)
+    out_of_mobile = models.CharField(max_length=100, blank=True, null=True)
+    blood_group = models.CharField(max_length=10, blank=True, null=True)
+    city = models.ForeignKey(City, on_delete=models.CASCADE, blank=True, null=True)
+    state = models.ForeignKey(State, on_delete=models.CASCADE, blank=True, null=True)
+    # new field added started. 
+    district = models.ForeignKey(
+        District, on_delete=models.SET_NULL, blank=True, null=True
+    )
+    taluka = models.ForeignKey(Taluka, on_delete=models.SET_NULL, blank=True, null=True)
+    village = models.ForeignKey(
+        Village, on_delete=models.SET_NULL, blank=True, null=True
+    )
+    # new field added ended. 
+    out_of_country = models.ForeignKey(Country, on_delete=models.CASCADE, default=1)
+    is_out_of_country = models.BooleanField(default=False)
+    international_mobile_number = models.CharField(max_length=50, blank=True, null=True)
+    guj_first_name = models.CharField(max_length=100, blank=True, null=True)
+    guj_middle_name = models.CharField(max_length=100, blank=True, null=True)
+    child_flag = models.BooleanField(default=False)
+    flag_show = models.BooleanField(default=False)
+    is_demo = models.BooleanField(default=True)
+    profile = models.ImageField(
+        upload_to="profiles/", blank=True, null=True, max_length=512
+    )
+    thumb_profile = models.ImageField(
+        upload_to="compress_img/", blank=True, null=True, max_length=512
+    )
+    status = models.CharField(max_length=50, blank=True, null=True)
+    is_admin = models.BooleanField(default=False)
+    is_same_as_father_address = models.BooleanField(default=False)
+    is_same_as_son_address = models.BooleanField(default=False)
+    # is_visible = models.BooleanField(default=False)
+    is_super_admin = models.BooleanField(default=False)
+    is_super_uper = models.BooleanField(default=False)
+    is_show_old_contact = models.BooleanField(default=True)
+    password = models.CharField(max_length=100, null=True, blank=True)
+    platform = models.CharField(max_length=30, default="postman", null=True, blank=True)
+    emoji = models.CharField(max_length=512, null=True, blank=True)
+    is_registered_directly = models.BooleanField(default=False)
+    update_field_message = models.CharField(max_length=1000, null=True, blank=True)
+    is_deleted = models.BooleanField(default=False)
+    deleted_by = models.IntegerField(blank=True, null=True, default=0)
+    created_time = models.DateTimeField(auto_now_add=True, blank=True)
+    deleted_at = models.DateTimeField(null=True, blank=True)
+
+    def __str__(self) -> str:
+        return str(self.first_name)
+
+    def get_surname_name(self, obj):
+        return f"{obj.surname.name}"
+
+    class Meta:
+        unique_together = (
+            "first_name",
+            "middle_name",
+            "date_of_birth",
+            "surname",
+            "mobile_number1",
+            "mobile_number2",
+        )
+
+    def delete(self, *args, **kwargs):
+        if self.profile and os.path.isfile(self.profile.path):
+            os.remove(self.profile.path)
+        if self.thumb_profile and os.path.isfile(self.thumb_profile.path):
+            os.remove(self.thumb_profile.path)
+        super(DemoPerson, self).delete(*args, **kwargs)
+
+    def save(self, *args, **kwargs):
+        if self.is_deleted == True:
+            self.deleted_at = datetime.now()
+        else:
+            self.deleted_at = None
+        super(DemoPerson, self).save(*args, **kwargs)
+
+class DemoParentChildRelation(models.Model):
+    parent = models.ForeignKey(DemoPerson, on_delete=models.CASCADE, related_name="demo_parent_relations")
+    child = models.ForeignKey(DemoPerson, on_delete=models.CASCADE, related_name="demo_child_relations")
+    created_user = models.ForeignKey(DemoPerson, on_delete=models.CASCADE)
+    created = models.DateTimeField(
+        auto_now_add=True,
+        editable=False,
+    )
+    is_deleted = models.BooleanField(default=False)
+    modified = models.DateTimeField(
+        auto_now=True,
+        null=True,
+        editable=False,
+    )
+
+    def __str__(self):
+        return str(self.id)
+    
+class DemoSurname(models.Model):
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=255, blank=True, unique=True)
+    top_member = models.CharField(max_length=100, default="", blank=True)
+    guj_name = models.CharField(max_length=255, blank=True, null=True)
+    fix_order = models.CharField(max_length=10, null=True, blank=True)
+
+    def __str__(self):
+        return self.name

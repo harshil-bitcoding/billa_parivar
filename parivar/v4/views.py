@@ -16,7 +16,8 @@ import random
 from ..models import (
     Person, District, Taluka, Village, State, 
     TranslatePerson, Surname, ParentChildRelation, Country,
-    BloodGroup, Banner, AdsSetting, PersonUpdateLog, RandomBanner
+    BloodGroup, Banner, AdsSetting, PersonUpdateLog, RandomBanner,
+    DemoPerson, DemoParentChildRelation, DemoSurname
 )
 from ..services import LocationResolverService, CSVImportService
 from django.conf import settings
@@ -137,7 +138,10 @@ class SurnameByVillageView(APIView):
             return Response({'error': 'Village not found'}, status=status.HTTP_404_NOT_FOUND)
             
         # Get unique surname IDs for members in this village
-        surname_ids = Person.objects.filter(
+        is_demo = request.GET.get("is_demo") == "true"
+        person_model = DemoPerson if is_demo else Person
+        
+        surname_ids = person_model.objects.filter(
             village_id=village_id, is_deleted=False, flag_show=True
         ).values_list('surname_id', flat=True).distinct()
         
@@ -174,7 +178,10 @@ class AdditionalDataByVillageView(APIView):
         except Village.DoesNotExist:
             return Response({'error': 'Village not found'}, status=status.HTTP_404_NOT_FOUND)
             
-        persons = Person.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
+        is_demo = request.GET.get("is_demo") == "true"
+        person_model = DemoPerson if is_demo else Person
+        
+        persons = person_model.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
         total_members = persons.count()
         
         return Response({
@@ -198,10 +205,10 @@ class PersonByVillageView(APIView):
         village_id = request.GET.get("village_id")
         surname_id = request.GET.get("surname_id")
         
-        if not village_id:
-            return Response({"error": "Village ID is required"}, status=status.HTTP_400_BAD_REQUEST)
-            
-        persons = Person.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
+        is_demo = request.GET.get("is_demo") == "true"
+        person_model = DemoPerson if is_demo else Person
+        
+        persons = person_model.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
         
         if surname_id:
             persons = persons.filter(surname_id=surname_id)
@@ -212,16 +219,24 @@ class PersonByVillageView(APIView):
             search_keywords = search.split(" ")
             query = Q()
             for keyword in search_keywords:
-                query &= (
+                keyword_query = (
                     Q(first_name__icontains=keyword) |
                     Q(middle_name__icontains=keyword) |
                     Q(surname__name__icontains=keyword) |
-                    Q(surname__guj_name__icontains=keyword) |
-                    Q(translateperson__first_name__icontains=keyword)
+                    Q(surname__guj_name__icontains=keyword)
                 )
+                if is_demo:
+                    keyword_query |= (
+                        Q(guj_first_name__icontains=keyword) |
+                        Q(guj_middle_name__icontains=keyword)
+                    )
+                else:
+                    keyword_query |= Q(translateperson__first_name__icontains=keyword)
+                
+                query &= keyword_query
             persons = persons.filter(query).distinct()
 
-        serializer = PersonV4Serializer(persons, many=True, context={"lang": lang})
+        serializer = PersonV4Serializer(persons, many=True, context={"lang": lang, "is_demo": is_demo})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 class V4LoginAPI(APIView):
@@ -254,18 +269,35 @@ class V4LoginAPI(APIView):
             )
             return Response({"message": error_message}, status=status.HTTP_400_BAD_REQUEST)
 
+        DEMO_MOBILE_NUMBER = "1111111111"
+        is_demo = mobile_number == DEMO_MOBILE_NUMBER
+
         try:
-            person = Person.objects.get(
-                Q(mobile_number1=mobile_number) | Q(mobile_number2=mobile_number),
-                is_deleted=False,
-            )
-        except Person.DoesNotExist:
+            if is_demo:
+                person = Person.objects.get(
+                    Q(mobile_number1=mobile_number) | Q(mobile_number2=mobile_number),
+                    is_deleted=False,
+                )
+            else:
+                is_demo_setting = mobile_number in getattr(settings, "DEMO_MOBILE_NUMBERS", [])
+                if is_demo_setting:
+                    person = DemoPerson.objects.get(
+                        Q(mobile_number1=mobile_number) | Q(mobile_number2=mobile_number),
+                        is_deleted=False,
+                    )
+                    is_demo = True
+                else:
+                    person = Person.objects.get(
+                        Q(mobile_number1=mobile_number) | Q(mobile_number2=mobile_number),
+                        is_deleted=False,
+                    )
+        except (Person.DoesNotExist, DemoPerson.DoesNotExist):
             error_message = "સભ્ય નોંધાયેલ નથી" if lang == "guj" else "Person not found"
             return Response({"message": error_message}, status=status.HTTP_404_NOT_FOUND)
 
         available_platform = "Ios" if is_ios_platform == True else "Android"
 
-        if player_id:
+        if player_id and not is_demo:
             try:
                 player_person = PersonPlayerId.objects.get(player_id=player_id)
                 if player_person:
@@ -280,39 +312,39 @@ class V4LoginAPI(APIView):
                 )
 
         serializer = PersonV4Serializer(
-            person, context={"lang": lang, "person_id": person.id}
+            person, context={"lang": lang, "person_id": person.id, "is_demo": is_demo}
         )
 
         admin_data = getadmincontact(
-            serializer.data.get("flag_show"), lang, serializer.data.get("surname")
+            serializer.data.get("flag_show"), lang, serializer.data.get("surname_name")
         )
         
         admin_data["person"] = serializer.data
         
         admin_user_id = serializer.data.get("id")
         if admin_user_id:
-            person_obj = Person.objects.get(pk=admin_user_id, is_deleted=False)
-            if person_obj.is_admin or person_obj.is_super_admin:
-                if person_obj.is_super_admin:
-                    # Super admin sees all pending requests
-                    pending_users = Person.objects.filter(
-                        flag_show=False, is_deleted=False
-                    )
-                else:
-                    # Village admin sees pending requests in their village with matching surname
-                    pending_users = Person.objects.filter(
-                        flag_show=False, 
-                        village=person_obj.village, 
-                        surname=person_obj.surname,
-                        is_deleted=False
-                    ).exclude(id=person_obj.surname.top_member if person_obj.surname else None)
-                
-                # Exclude top members if applicable (matching V3 logic style)
-                # But here we probably want to exclude them from the count too if they are "system" members
-                # For now, let's just count all pending in the village
-                pendingdata_count = pending_users.count()
-            else:
+            if is_demo:
                 pendingdata_count = 0
+            else:
+                try:
+                    person_obj = Person.objects.get(pk=admin_user_id, is_deleted=False)
+                    if person_obj.is_admin or person_obj.is_super_admin:
+                        if person_obj.is_super_admin:
+                            pending_users = Person.objects.filter(
+                                flag_show=False, is_deleted=False
+                            )
+                        else:
+                            pending_users = Person.objects.filter(
+                                flag_show=False, 
+                                village=person_obj.village, 
+                                surname=person_obj.surname,
+                                is_deleted=False
+                            ).exclude(id=person_obj.surname.top_member if person_obj.surname else None)
+                        pendingdata_count = pending_users.count()
+                    else:
+                        pendingdata_count = 0
+                except Person.DoesNotExist:
+                    pendingdata_count = 0
             
             response_data = {"pending-data": pendingdata_count}
             response_data.update(admin_data)
@@ -897,47 +929,53 @@ class V4RelationtreeAPIView(APIView):
     def get(self, request):
         lang = request.GET.get("lang", "en")
         person_id = request.GET.get("person_id")
+        is_demo = request.GET.get("is_demo") == "true"
+        
+        person_model = DemoPerson if is_demo else Person
+        rel_model = DemoParentChildRelation if is_demo else ParentChildRelation
 
         try:
-            person = Person.objects.get(id=person_id, is_deleted=False)
+            person = person_model.objects.get(id=person_id, is_deleted=False)
             surname = person.surname.id
-            surname_topmember = Surname.objects.get(id=surname)
-            topmember = surname_topmember.top_member
+            surname_model = DemoSurname if is_demo else Surname
+            surname_obj = surname_model.objects.get(id=surname)
+            topmember = surname_obj.top_member
 
             # Initialize relations with the first query
-            relations = ParentChildRelation.objects.filter(child_id=person_id)
+            relations = rel_model.objects.filter(child_id=person_id, is_deleted=False)
             parent_data_id = {
-                person_id
+                int(person_id)
             }  # To keep track of already processed parent ids
 
             while relations:
                 new_relations = []
                 for relation in relations:
                     parent_id = relation.parent.id
-                    if parent_id == topmember:
+                    if str(parent_id) == str(topmember):
                         break
-                    if parent_id not in parent_data_id:
-                        parent_data_id.add(parent_id)
+                    if int(parent_id) not in parent_data_id:
+                        parent_data_id.add(int(parent_id))
                         new_relations.extend(
-                            ParentChildRelation.objects.filter(
+                            rel_model.objects.filter(
                                 child_id=parent_id, is_deleted=False
                             )
                         )
                 relations = new_relations
+            
             person_data = (
-                Person.objects.filter(
+                person_model.objects.filter(
                     surname__id=surname, flag_show=True, is_deleted=False
                 )
                 .exclude(id__in=parent_data_id)
                 .order_by("first_name")
             )
             serializer = PersonGetSerializer(
-                person_data, many=True, context={"lang": lang}
+                person_data, many=True, context={"lang": lang, "is_demo": is_demo}
             )
 
             return Response({"data": serializer.data})
 
-        except Person.DoesNotExist:
+        except (Person.DoesNotExist, DemoPerson.DoesNotExist):
             return Response(
                 {"error": "Person not found"}, status=status.HTTP_404_NOT_FOUND
             )
@@ -999,40 +1037,45 @@ class V4PersonDetailView(APIView):
     authentication_classes = []
 
     def get(self, request, pk):
+        is_demo = request.GET.get("is_demo") == "true"
+        model = DemoPerson if is_demo else Person
+        rel_model = DemoParentChildRelation if is_demo else ParentChildRelation
+        
         try:
-            person = Person.objects.get(id=pk)
-            if person:
+            person_obj = model.objects.get(id=pk)
+            if person_obj:
                 lang = request.GET.get("lang", "en")
-                person = PersonGetSerializer(person, context={"lang": lang}).data
-                person["child"] = []
-                person["parent"] = {}
-                person["brother"] = []
-                child_data = ParentChildRelation.objects.filter(parent=int(person["id"]))
+                person_data = PersonGetSerializer(person_obj, context={"lang": lang, "is_demo": is_demo}).data
+                person_data["child"] = []
+                person_data["parent"] = {}
+                person_data["brother"] = []
+                child_data = rel_model.objects.filter(parent=int(person_data["id"]), is_deleted=False)
                 if child_data.exists():
                     child_data = GetParentChildRelationSerializer(
-                        child_data, many=True, context={"lang": lang}
+                        child_data, many=True, context={"lang": lang, "is_demo": is_demo}
                     ).data
                     for child in child_data:
-                        person["child"].append(child.get("child"))
-                parent_data = ParentChildRelation.objects.filter(
-                    child=int(person["id"])
+                        person_data["child"].append(child.get("child"))
+                parent_relation = rel_model.objects.filter(
+                    child=int(person_data["id"]), is_deleted=False
                 ).first()
-                if parent_data:
-                    parent_data = GetParentChildRelationSerializer(
-                        parent_data, context={"lang": lang}
+                if parent_relation:
+                    parent_relation_data = GetParentChildRelationSerializer(
+                        parent_relation, context={"lang": lang, "is_demo": is_demo}
                     ).data
-                    person["parent"] = parent_data.get("parent")
-                    brother_data = ParentChildRelation.objects.filter(
-                        parent=int(parent_data.get("parent").get("id", 0))
+                    person_data["parent"] = parent_relation_data.get("parent")
+                    brother_data = rel_model.objects.filter(
+                        parent=int(parent_relation_data.get("parent").get("id", 0)),
+                        is_deleted=False
                     )
                     if brother_data.exists():
-                        brother_data = GetParentChildRelationSerializer(
-                            brother_data, many=True, context={"lang": lang}
+                        brother_data_serializer = GetParentChildRelationSerializer(
+                            brother_data, many=True, context={"lang": lang, "is_demo": is_demo}
                         ).data
-                        for brother in brother_data:
-                            if int(person["id"]) != int(brother["child"]["id"]):
-                                person["brother"].append(brother.get("child"))
-                return Response(person, status=status.HTTP_200_OK)
+                        for brother in brother_data_serializer:
+                            if int(person_data["id"]) != int(brother["child"]["id"]):
+                                person_data["brother"].append(brother.get("child"))
+                return Response(person_data, status=status.HTTP_200_OK)
         except Person.DoesNotExist:
             return Response(
                 {"error": "Person not found"}, status=status.HTTP_404_NOT_FOUND

@@ -23,6 +23,13 @@
                         <input type="file" name="csv_file" id="id_csv_file" accept=".csv, .xlsx, .xls" required>
                     </div>
                 </div>
+                <div class="form-row">
+                    <div class="checkbox-row">
+                        <input type="checkbox" name="is_demo" id="id_is_demo">
+                        <label class="vCheckboxLabel" for="id_is_demo">Import as Demo Data</label>
+                        <div class="help">If checked, data will be inserted into the Dummy/Demo tables.</div>
+                    </div>
+                </div>
             </fieldset>
             <div class="submit-row">
                 <input type="submit" value="{% trans 'Upload and Process' %}" class="default">
