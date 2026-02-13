@@ -390,6 +390,10 @@ class DemoParentChildRelationAdmin(admin.ModelAdmin):
     list_display = ["id", "parent", "child", "created_user", "is_deleted"]
     search_fields = ["parent__first_name", "child__first_name"]
 
+@admin.register(DemoSurname)
+class DemoSurnameAdmin(admin.ModelAdmin):
+    list_display = ["id", "name", "top_member", "guj_name", "fix_order"]
+
 @admin.register(PersonUpdateLog)
 class PersonUpdateLogAdmin(admin.ModelAdmin):
     list_display = ["id", "person", "updated_history", "created_person", "created_at"]

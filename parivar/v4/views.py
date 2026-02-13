@@ -934,16 +934,43 @@ class V4RelationtreeAPIView(APIView):
     def get(self, request):
         lang = request.GET.get("lang", "en")
         person_id = request.GET.get("person_id")
-        is_demo = request.GET.get("is_demo") == "true"
+        is_demo = str(request.GET.get("is_demo")).lower() == "true"
         
         person_model = DemoPerson if is_demo else Person
         rel_model = DemoParentChildRelation if is_demo else ParentChildRelation
+        surname_model = DemoSurname if is_demo else Surname
 
         try:
-            person = person_model.objects.get(id=person_id, is_deleted=False)
-            surname = person.surname.id
+            if is_demo:
+                 try:
+                     person = person_model.objects.get(id=person_id, is_deleted=False)
+                 except person_model.DoesNotExist:
+                     # Fallback: If specific DemoPerson not found (e.g. Guest ID passed), use the first available DemoPerson
+                     # Just get the first available person, ignoring strict surname validity check for now since DemoSurname might be empty
+                     person = person_model.objects.filter(is_deleted=False).first()
+
+                     if not person:
+                         return Response({"error": "No Demo Data Available"}, status=status.HTTP_404_NOT_FOUND)
+                     person_id = person.id
+            else:
+                person = person_model.objects.get(id=person_id, is_deleted=False)
+
+            # Use surname_id to avoid direct FK lookup error if related object doesn't exist
+            surname_id = person.surname_id
             surname_model = DemoSurname if is_demo else Surname
-            surname_obj = surname_model.objects.get(id=surname)
+            
+            try:
+                surname_obj = surname_model.objects.get(id=surname_id)
+            except surname_model.DoesNotExist:
+                # Fallback: If DemoSurname doesn't exist (common in partial demo data), try valid Surname from main table
+                if is_demo:
+                    try:
+                        surname_obj = Surname.objects.get(id=surname_id)
+                    except Surname.DoesNotExist:
+                         return Response({"error": "Surname not found"}, status=status.HTTP_404_NOT_FOUND)
+                else:
+                    return Response({"error": "Surname not found"}, status=status.HTTP_404_NOT_FOUND)
+
             topmember = surname_obj.top_member
 
             # Initialize relations with the first query
@@ -967,9 +994,11 @@ class V4RelationtreeAPIView(APIView):
                         )
                 relations = new_relations
             
+            # For fetching person data, we need to be careful if we are mixing DemoPerson and main Surname
+            # The filter 'surname__id=surname_id' works on the FK ID column, so it should be fine even if FK is virtual
             person_data = (
                 person_model.objects.filter(
-                    surname__id=surname, flag_show=True, is_deleted=False
+                    surname__id=surname_id, flag_show=True, is_deleted=False
                 )
                 .exclude(id__in=parent_data_id)
                 .order_by("first_name")
@@ -984,9 +1013,9 @@ class V4RelationtreeAPIView(APIView):
             return Response(
                 {"error": "Person not found"}, status=status.HTTP_404_NOT_FOUND
             )
-        except Surname.DoesNotExist:
+        except Exception as e:
             return Response(
-                {"error": "Surname not found"}, status=status.HTTP_404_NOT_FOUND
+                {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
             #     {"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR
             # )
