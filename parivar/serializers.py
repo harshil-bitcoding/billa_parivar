@@ -368,6 +368,9 @@ class PersonV4Serializer(serializers.ModelSerializer):
             data["district_name"] = self.get_district_name(source_instance)
             data["city_name"] = self.get_city_name(source_instance)
             data["state_name"] = self.get_state_name(source_instance)
+            data["village_name"] = self.get_village_name(source_instance)
+            data["taluka_name"] = self.get_taluka_name(source_instance)
+            data["district_name"] = self.get_district_name(source_instance)
         
         # Consistent field naming for surname
         if source_instance.surname:
@@ -406,7 +409,14 @@ class PersonSerializer(serializers.ModelSerializer):
             "is_registered_directly",
             "update_field_message",
             "platform",
+            "village",
+            "taluka",
+            "district",
         ]
+
+class DemoPersonSerializer(PersonSerializer):
+    class Meta(PersonSerializer.Meta):
+        model = DemoPerson
 
     def get_blood_group(self, obj):
         return ""
@@ -457,9 +467,9 @@ class PersonSerializer(serializers.ModelSerializer):
         # if blood_group is None:
         #     raise serializers.DjangoValidationError({"message":"Blood group is required."})
 
-        city = data.get("city")
-        if not city:
-            raise serializers.DjangoValidationError({"message": "City is required."})
+        # city = data.get("city")
+        # if not city:
+        #     raise serializers.DjangoValidationError({"message": "City is required."})
 
         # district = data.get("district")
         # if not district:
@@ -581,8 +591,17 @@ class PersonSerializerV2(serializers.ModelSerializer):
             "profile",
             "thumb_profile",
             "status",
-            "surname"
+            "surname",
+            "village",
+            "taluka",
+            "district",
+            "city",
+            "state",
         ]
+        extra_kwargs = {
+            "city": {"required": False, "allow_null": True},
+            "state": {"required": False, "allow_null": True},
+        }
 
     def validate(self, data):
 
@@ -660,6 +679,10 @@ class PersonSerializerV2(serializers.ModelSerializer):
                 )
 
         return data
+
+class DemoPersonSerializerV2(PersonSerializerV2):
+    class Meta(PersonSerializerV2.Meta):
+        model = DemoPerson
 
 class AdminPersonGetSerializer(serializers.ModelSerializer):
     guj_first_name = serializers.SerializerMethodField(read_only=True, required=False)
@@ -773,6 +796,9 @@ class PersonGetSerializer(serializers.ModelSerializer):
     surname = serializers.SerializerMethodField(read_only=True, required=False)
     profile = serializers.SerializerMethodField(read_only=True, required=False)
     thumb_profile = serializers.SerializerMethodField(read_only=True, required=False)
+    village = serializers.SerializerMethodField(read_only=True, required=False)
+    taluka = serializers.SerializerMethodField(read_only=True, required=False)
+    district = serializers.SerializerMethodField(read_only=True, required=False)
 
     # password = serializers.SerializerMethodField    (read_only=True)
     class Meta:
@@ -805,7 +831,10 @@ class PersonGetSerializer(serializers.ModelSerializer):
             "is_registered_directly",
             "is_deleted",
             "deleted_by",
-            "is_show_old_contact"
+            "is_show_old_contact",
+            "village",
+            "taluka",
+            "district"
         ]
 
     # def get_password(self, obj) :
@@ -853,6 +882,30 @@ class PersonGetSerializer(serializers.ModelSerializer):
             if lang == "guj":
                 return obj.out_of_country.guj_name
             return obj.out_of_country.name
+        return ""
+
+    def get_village(self, obj):
+        if hasattr(obj, 'village') and obj.village is not None:
+            lang = self.context.get("lang", "en")
+            if lang == "guj":
+                return obj.village.guj_name
+            return obj.village.name
+        return ""
+
+    def get_taluka(self, obj):
+        if hasattr(obj, 'taluka') and obj.taluka is not None:
+            lang = self.context.get("lang", "en")
+            if lang == "guj":
+                return obj.taluka.guj_name
+            return obj.taluka.name
+        return ""
+
+    def get_district(self, obj):
+        if hasattr(obj, 'district') and obj.district is not None:
+            lang = self.context.get("lang", "en")
+            if lang == "guj":
+                return obj.district.guj_name
+            return obj.district.name
         return ""
 
     def get_surname(self, obj):
@@ -960,6 +1013,9 @@ class TranslatePersonSerializer(serializers.ModelSerializer):
             "language",
         ]
 
+class DemoTranslatePersonSerializer(TranslatePersonSerializer):
+    pass
+
 class CitySerializer(serializers.ModelSerializer):
     class Meta:
         model = City
@@ -1063,6 +1119,35 @@ class ParentChildRelationSerializer(serializers.ModelSerializer):
                 "Parent ID and Child ID cannot be the same."
             )
         existing_relations = ParentChildRelation.objects.filter(
+            Q(parent=parent_id) & Q(child=child_id)
+            | Q(child=parent_id) & Q(parent=child_id),
+            is_deleted=False,
+        )
+        if existing_relations.exists():
+            if self.instance:
+                existing_relation = existing_relations.filter(pk=self.instance.pk)
+                if not existing_relation.exists():
+                    raise serializers.ValidationError(
+                        "A relation with these parent and child IDs already exists."
+                    )
+            else:
+                raise serializers.ValidationError(
+                    "A relation with these parent and child IDs already exists."
+                )
+        return data
+
+class DemoParentChildRelationSerializer(ParentChildRelationSerializer):
+    class Meta(ParentChildRelationSerializer.Meta):
+        model = DemoParentChildRelation
+
+    def validate(self, data):
+        parent_id = data.get("parent")
+        child_id = data.get("child")
+        if parent_id == child_id:
+            raise serializers.ValidationError(
+                "Parent ID and Child ID cannot be the same."
+            )
+        existing_relations = DemoParentChildRelation.objects.filter(
             Q(parent=parent_id) & Q(child=child_id)
             | Q(child=parent_id) & Q(parent=child_id),
             is_deleted=False,
