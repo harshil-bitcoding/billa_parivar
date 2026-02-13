@@ -91,6 +91,10 @@ class PersonV4Serializer(serializers.ModelSerializer):
     city_name = serializers.SerializerMethodField(read_only=True)
     state_name = serializers.SerializerMethodField(read_only=True)
     relations = serializers.SerializerMethodField(read_only=True)
+    surname = serializers.SerializerMethodField(read_only=True)
+    city = serializers.SerializerMethodField(read_only=True)
+    state = serializers.SerializerMethodField(read_only=True)
+    out_of_country = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Person
@@ -131,6 +135,15 @@ class PersonV4Serializer(serializers.ModelSerializer):
             "platform",
             "relations",
             "is_demo",
+            "surname",
+            "city",
+            "state",
+            "out_of_country",
+            "is_super_uper",
+            "is_show_old_contact",
+            "password",
+            "is_deleted",
+            "deleted_by",
         ]
 
     def get_surname_name(self, obj):
@@ -180,6 +193,37 @@ class PersonV4Serializer(serializers.ModelSerializer):
                 return obj.state.guj_name
             return obj.state.name
         return None
+
+    def get_surname(self, obj):
+        lang = self.context.get("lang", "en")
+        if obj.surname:
+            if lang == "guj" and obj.surname.guj_name:
+                return obj.surname.guj_name
+            return obj.surname.name
+        return None
+
+    def get_village(self, obj):
+        return self.get_village_name(obj) or ""
+
+    def get_taluka(self, obj):
+        return self.get_taluka_name(obj) or ""
+
+    def get_district(self, obj):
+        return self.get_district_name(obj) or ""
+
+    def get_city(self, obj):
+        return self.get_city_name(obj) or ""
+
+    def get_state(self, obj):
+        return self.get_state_name(obj) or ""
+
+    def get_out_of_country(self, obj):
+        lang = self.context.get("lang", "en")
+        if obj.out_of_country:
+            if lang == "guj" and obj.out_of_country.guj_name:
+                return obj.out_of_country.guj_name
+            return obj.out_of_country.name
+        return ""
 
     def get_relations(self, obj):
         is_demo = self.context.get("is_demo", False)
@@ -1302,3 +1346,69 @@ class PersonGetDataSortSerializer(serializers.ModelSerializer):
                 )
 
         return representation
+
+class RelationtreePersonSerializer(serializers.ModelSerializer):
+    translated_first_name = serializers.SerializerMethodField(read_only=True)
+    translated_middle_name = serializers.SerializerMethodField(read_only=True)
+    profile = serializers.SerializerMethodField(read_only=True)
+    thumb_profile = serializers.SerializerMethodField(read_only=True)
+
+    class Meta:
+        model = Person
+        fields = [
+            "id",
+            "date_of_birth",
+            "profile",
+            "thumb_profile",
+            "mobile_number1",
+            "mobile_number2",
+            "out_of_country",
+            "flag_show",
+            "emoji",
+            "translated_first_name",
+            "translated_middle_name",
+        ]
+
+    def get_translated_first_name(self, obj):
+        lang = self.context.get("lang", "en")
+        is_demo = self.context.get("is_demo", False)
+        if is_demo:
+            return obj.guj_first_name if lang == "guj" and obj.guj_first_name else obj.first_name
+        
+        if lang == "guj":
+            translate_data = TranslatePerson.objects.filter(
+                person_id=obj.id, language="guj", is_deleted=False
+            ).first()
+            return translate_data.first_name if translate_data else obj.first_name
+        return obj.first_name
+
+    def get_translated_middle_name(self, obj):
+        lang = self.context.get("lang", "en")
+        is_demo = self.context.get("is_demo", False)
+        if is_demo:
+            return obj.guj_middle_name if lang == "guj" and obj.guj_middle_name else obj.middle_name
+        
+        if lang == "guj":
+            translate_data = TranslatePerson.objects.filter(
+                person_id=obj.id, language="guj", is_deleted=False
+            ).first()
+            return translate_data.middle_name if translate_data else obj.middle_name
+        return obj.middle_name
+
+    def get_profile(self, obj):
+        if obj.profile:
+            return obj.profile.url
+        return os.getenv("DEFAULT_PROFILE_PATH")
+
+    def get_thumb_profile(self, obj):
+        if obj.thumb_profile:
+            return obj.thumb_profile.url
+        return os.getenv("DEFAULT_PROFILE_PATH")
+
+class V4RelationTreeSerializer(serializers.ModelSerializer):
+    parent = RelationtreePersonSerializer(read_only=True)
+    child = RelationtreePersonSerializer(read_only=True)
+
+    class Meta:
+        model = ParentChildRelation
+        fields = ["id", "parent", "child"]

@@ -47,7 +47,8 @@ from ..serializers import (
     PersonGetSerializer2,
     TranslatePersonSerializer,
     CitySerializer,
-    CountrySerializer
+    CountrySerializer,
+    V4RelationTreeSerializer
 )
 from ..views import getadmincontact
 import logging
@@ -994,20 +995,27 @@ class V4RelationtreeAPIView(APIView):
                         )
                 relations = new_relations
             
-            # For fetching person data, we need to be careful if we are mixing DemoPerson and main Surname
-            # The filter 'surname__id=surname_id' works on the FK ID column, so it should be fine even if FK is virtual
-            person_data = (
-                person_model.objects.filter(
-                    surname__id=surname_id, flag_show=True, is_deleted=False
-                )
-                .exclude(id__in=parent_data_id)
-                .order_by("first_name")
-            )
-            serializer = PersonGetSerializer(
-                person_data, many=True, context={"lang": lang, "is_demo": is_demo}
+            # Aligning with old response: total_count is the member count (excluding ancestors)
+            person_query = person_model.objects.filter(
+                surname__id=surname_id, flag_show=True, is_deleted=False
+            ).exclude(id__in=parent_data_id)
+            total_count = person_query.count()
+
+            # Aligning with old response: data is a list of parent/child pairs
+            relation_data = rel_model.objects.filter(
+                child__surname_id=surname_id,
+                parent__surname_id=surname_id,
+                is_deleted=False
+            ).exclude(child_id__in=parent_data_id).select_related('parent', 'child')
+
+            serializer = V4RelationTreeSerializer(
+                relation_data, many=True, context={"lang": lang, "is_demo": is_demo}
             )
 
-            return Response({"data": serializer.data})
+            return Response({
+                "total_count": total_count,
+                "data": serializer.data
+            }, status=status.HTTP_200_OK)
 
         except (Person.DoesNotExist, DemoPerson.DoesNotExist):
             return Response(
