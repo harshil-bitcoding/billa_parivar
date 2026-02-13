@@ -1836,17 +1836,22 @@ class V4ChildPerson(APIView):
         try:
             person_id = request.GET.get("parent_id")
             lang = request.GET.get("lang", "en")
-            child_ids = ParentChildRelation.objects.filter(
+            is_demo = request.GET.get("is_demo") == "true"
+            
+            rel_model = DemoParentChildRelation if is_demo else ParentChildRelation
+            person_model = DemoPerson if is_demo else Person
+            
+            child_ids = rel_model.objects.filter(
                 parent=int(person_id)
             ).values_list("child", flat=True)
-            children = Person.objects.filter(id__in=child_ids, is_deleted=False)
+            children = person_model.objects.filter(id__in=child_ids, is_deleted=False)
             child_data = PersonGetSerializer(
-                children, many=True, context={"lang": lang}
+                children, many=True, context={"lang": lang, "is_demo": is_demo}
             )
             return Response({"child_data": child_data.data}, status=status.HTTP_200_OK)
         except Exception as e:
             return Response(
-                {"child_data": [], "Error": e},
+                {"child_data": [], "Error": str(e)},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR,
             )
 
@@ -2312,39 +2317,74 @@ class V4PersonBySurnameViewV3(APIView):
         surname = request.data.get("surname")
         lang = request.data.get("lang", "en")
         is_father_selection = request.data.get("is_father_selection", "").lower()
+        is_demo = request.data.get("is_demo") == "true"
 
         if not surname:
             message = "અટક જરૂરી છે" if lang == "guj" else "Surname ID is required"
             return JsonResponse({"message": message, "data": []}, status=status.HTTP_400_BAD_REQUEST)
 
-        persons = (
-            Person.objects.filter(surname__id=surname, is_deleted=False, flag_show=True)
-            .exclude(
-                id__in=Surname.objects.annotate(
-                    top_member_as_int=Cast("top_member", IntegerField())
-                ).values_list("top_member_as_int", flat=True)
+        person_model = DemoPerson if is_demo else Person
+        surname_model = DemoSurname if is_demo else Surname
+
+        if is_demo:
+            # Safer exclusion for demo data where top_member might be non-numeric
+            top_member_ids = []
+            for tm in surname_model.objects.exclude(top_member="").values_list("top_member", flat=True):
+                if tm.isdigit():
+                    top_member_ids.append(int(tm))
+
+            persons = (
+                person_model.objects.filter(surname__id=surname, is_deleted=False, flag_show=True)
+                .exclude(id__in=top_member_ids)
+                .select_related("surname")
+                .distinct()
+                .values(
+                    "id",
+                    "first_name",
+                    "guj_first_name",
+                    "middle_name",
+                    "guj_middle_name",
+                    "date_of_birth",
+                    "mobile_number1",
+                    "mobile_number2",
+                    "flag_show",
+                    "profile",
+                    "is_admin",
+                    "surname",
+                    "surname__name",
+                    "surname__guj_name",
+                    "thumb_profile",
+                )
             )
-            .select_related("surname")
-            .prefetch_related("translateperson")
-            .distinct()
-            .values(
-                "id",
-                "first_name",
-                "translateperson__first_name",
-                "middle_name",
-                "translateperson__middle_name",
-                "date_of_birth",
-                "mobile_number1",
-                "mobile_number2",
-                "flag_show",
-                "profile",
-                "is_admin",
-                "surname",
-                "surname__name",
-                "surname__guj_name",
-                "thumb_profile",
+        else:
+            persons = (
+                person_model.objects.filter(surname__id=surname, is_deleted=False, flag_show=True)
+                .exclude(
+                    id__in=surname_model.objects.annotate(
+                        top_member_as_int=Cast("top_member", IntegerField())
+                    ).values_list("top_member_as_int", flat=True)
+                )
+                .select_related("surname")
+                .prefetch_related("translateperson")
+                .distinct()
+                .values(
+                    "id",
+                    "first_name",
+                    "translateperson__first_name",
+                    "middle_name",
+                    "translateperson__middle_name",
+                    "date_of_birth",
+                    "mobile_number1",
+                    "mobile_number2",
+                    "flag_show",
+                    "profile",
+                    "is_admin",
+                    "surname",
+                    "surname__name",
+                    "surname__guj_name",
+                    "thumb_profile",
+                )
             )
-        )
 
         if is_father_selection != "true":
             persons = persons.filter(
@@ -2352,15 +2392,25 @@ class V4PersonBySurnameViewV3(APIView):
             ).exclude(mobile_number1="")
 
         if persons.exists():
-            persons = (
-                persons.order_by("first_name", "middle_name")
-                if lang == "en"
-                else persons.order_by(
-                    "translateperson__first_name", "translateperson__middle_name"
+            if is_demo:
+                persons = (
+                    persons.order_by("first_name", "middle_name")
+                    if lang == "en"
+                    else persons.order_by("guj_first_name", "guj_middle_name")
                 )
-            )
+            else:
+                persons = (
+                    persons.order_by("first_name", "middle_name")
+                    if lang == "en"
+                    else persons.order_by(
+                        "translateperson__first_name", "translateperson__middle_name"
+                    )
+                )
 
             for person in persons:
+                trans_first = person.get("guj_first_name") if is_demo else person.get("translateperson__first_name")
+                trans_middle = person.get("guj_middle_name") if is_demo else person.get("translateperson__middle_name")
+                
                 if lang != "en":
                     person["surname"] = person["surname__guj_name"]
                     (
@@ -2369,16 +2419,16 @@ class V4PersonBySurnameViewV3(APIView):
                         person["trans_first_name"],
                         person["trans_middle_name"],
                     ) = (
-                        person["translateperson__first_name"],
-                        person["translateperson__middle_name"],
+                        trans_first,
+                        trans_middle,
                         person["first_name"],
                         person["middle_name"],
                     )
                 else:
                     person["surname"] = person["surname__name"]
                     person["trans_first_name"], person["trans_middle_name"] = (
-                        person["translateperson__first_name"],
-                        person["translateperson__middle_name"],
+                        trans_first,
+                        trans_middle,
                     )
                 if (
                     person["profile"]
@@ -2396,10 +2446,15 @@ class V4PersonBySurnameViewV3(APIView):
                     person["thumb_profile"] = f"/media/{(person['thumb_profile'])}"
                 else:
                     person["thumb_profile"] = os.getenv("DEFAULT_PROFILE_PATH")
-                person.pop("translateperson__first_name")
-                person.pop("translateperson__middle_name")
-                person.pop("surname__name")
-                person.pop("surname__guj_name")
+                
+                if is_demo:
+                    person.pop("guj_first_name", None)
+                    person.pop("guj_middle_name", None)
+                else:
+                    person.pop("translateperson__first_name", None)
+                    person.pop("translateperson__middle_name", None)
+                person.pop("surname__name", None)
+                person.pop("surname__guj_name", None)
 
             results = list(persons)
             return JsonResponse({"data": results}, status=status.HTTP_200_OK)
