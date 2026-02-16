@@ -1776,8 +1776,10 @@ class V4AdminPersonDetailView(APIView):
         else:
             return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
-    def put(self, request):
-        admin_user_id = request.data.get("admin_user_id")
+    def put(self, request, pk=None, admin_user_id=None):
+        if not admin_user_id:
+            admin_user_id = request.data.get("admin_user_id")
+        
         if not admin_user_id:
             return Response(
                 {"message": "Missing Admin User in request data"},
@@ -1796,7 +1798,11 @@ class V4AdminPersonDetailView(APIView):
                 status=status.HTTP_200_OK,
             )
 
-        user_id = request.data.get("user_id")
+        if not pk:
+            user_id = request.data.get("user_id")
+        else:
+            user_id = pk
+            
         if not user_id:
             return Response(
                 {"message": "Missing User in request data"},
