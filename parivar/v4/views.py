@@ -2260,7 +2260,7 @@ def V4updated_log(person_id, updated_history, created_person_id):
         return Response({"error": f"{e}"}, status=status.HTTP_400_BAD_REQUEST)
 
 
-class V4ParentChildRelationDetailViewV3(APIView):
+class V4ParentChildRelationDetailView(APIView):
     def post(self, request):
         serializer = ParentChildRelationSerializer(data=request.data)
         if serializer.is_valid():
@@ -2543,7 +2543,7 @@ class V4ParentChildRelationDetailViewV3(APIView):
         )
 
 
-class V4PersonBySurnameViewV3(APIView):
+class V4PersonBySurnameView(APIView):
     def post(self, request):
         is_father_selection = request.data.get("is_father_selection", "").lower()
         is_demo = request.data.get("is_demo") == "true"
@@ -2851,7 +2851,7 @@ class V4AdditionalData(APIView):
         return Response({"additional_data": additional_data}, status=status.HTTP_200_OK)
 
 
-class V4V3SurnameDetailView(APIView):
+class V4SurnameDetailView(APIView):
     authentication_classes = []
 
     def get(self, request):
@@ -2947,7 +2947,7 @@ def V4append_to_log(filename, message):
         file.write(message + "\n")
 
 
-class V4V3BannerDetailView(APIView):
+class V4BannerDetailView(APIView):
     def get(self, request):
         today = datetime.now().date()
         Banner.objects.filter(
