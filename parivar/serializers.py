@@ -770,10 +770,10 @@ class AdminPersonGetSerializer(serializers.ModelSerializer):
     #     return obj.blood_group.bloodgroup
 
     def get_city(self, obj):
-        return obj.city.name
+        return obj.city.name if obj.city else ""
 
     def get_state(self, obj):
-        return obj.state.name
+        return obj.state.name if obj.state else ""
 
     def get_out_of_country(self, obj):
         if obj.out_of_country is not None:
@@ -786,7 +786,7 @@ class AdminPersonGetSerializer(serializers.ModelSerializer):
         return ""
 
     def get_surname(self, obj):
-        return obj.surname.name
+        return obj.surname.name if obj.surname else ""
 
 class PersonGetSerializer(serializers.ModelSerializer):
 

@@ -1917,13 +1917,14 @@ class V4AdminPersonDetailView(APIView):
 
             persons = serializer.save()
 
-            father_data = rel_model.objects.filter(child=persons.id)
-            if father_data.exists():
-                father_data.update(child=persons.id, parent=father)
-            else:
-                rel_model.objects.create(
-                    child=persons.id, parent=father, created_user=admin_user_id
-                )
+            if father > 0:
+                father_data = rel_model.objects.filter(child=persons.id)
+                if father_data.exists():
+                    father_data.update(child=persons.id, parent=father)
+                else:
+                    rel_model.objects.create(
+                        child=persons.id, parent=father, created_user=admin_user_id
+                    )
 
             for child in children:
                 child_data = rel_model.objects.filter(child=child)
