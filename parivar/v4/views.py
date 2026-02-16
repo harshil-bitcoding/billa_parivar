@@ -1571,8 +1571,7 @@ class V4PersonDetailView(APIView):
 class V4AdminPersonDetailView(APIView):
     authentication_classes = []
 
-    def get(self, request, pk, admin_uid):
-        admin_user_id = admin_uid
+    def get(self, request, pk, admin_user_id):
         if not admin_user_id:
             return Response(
                 {"message": "Missing Admin User in request data"},
