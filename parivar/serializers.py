@@ -68,12 +68,21 @@ class TalukaSerializer(serializers.ModelSerializer):
         return data
 
 
+
+
 class VillageSerializer(serializers.ModelSerializer):
     taluka_name = serializers.ReadOnlyField(source="taluka.name")
+    samaj_list = serializers.SerializerMethodField(read_only=True)
 
     class Meta:
         model = Village
-        fields = ["id", "name", "guj_name", "taluka", "taluka_name"]
+        fields = ["id", "name", "guj_name", "taluka", "taluka_name", "samaj_list"]
+
+    def get_samaj_list(self, obj):
+        from .models import Samaj
+        lang = self.context.get("lang", "en")
+        samaj_queryset = obj.samaj_list.all()
+        return SamajSerializer(samaj_queryset, many=True, context={"lang": lang}).data
 
     def to_representation(self, instance):
         lang = self.context.get("lang", "en")
@@ -81,6 +90,22 @@ class VillageSerializer(serializers.ModelSerializer):
         if lang == "guj" and instance.guj_name:
             data["name"] = instance.guj_name
         return data
+
+
+class SamajSerializer(serializers.ModelSerializer):
+    """Serializer for Samaj (community) model"""
+    
+    class Meta:
+        model = Samaj
+        fields = ['id', 'name', 'guj_name', 'logo', 'referral_code', 'is_premium']
+    
+    def to_representation(self, instance):
+        data = super().to_representation(instance)
+        lang = self.context.get('lang', 'en')
+        if lang == 'guj' and instance.guj_name:
+            data['name'] = instance.guj_name
+        return data
+
 
 
 class PersonV4Serializer(serializers.ModelSerializer):
@@ -144,6 +169,8 @@ class PersonV4Serializer(serializers.ModelSerializer):
             "password",
             "is_deleted",
             "deleted_by",
+            "samaj",
+            "is_premium",
         ]
 
     def get_surname_name(self, obj):

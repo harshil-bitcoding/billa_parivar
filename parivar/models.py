@@ -106,13 +106,35 @@ class Village(models.Model):
     guj_name = models.CharField(max_length=255, blank=True, null=True)
     taluka = models.ForeignKey(Taluka, related_name="villages", on_delete=models.CASCADE)
     is_active = models.BooleanField(default=True)
-    referral_code = models.CharField(max_length=50, blank=True, null=True)
 
     def __str__(self):
         return f"{self.name} ({self.taluka.name} - {self.taluka.district.name})"
 
     class Meta:
         unique_together = ("name", "taluka")
+
+
+class Samaj(models.Model):
+    """Community/Samaj model representing surname-based communities"""
+    id = models.AutoField(primary_key=True)
+    name = models.CharField(max_length=100, help_text="English samaj name")
+    guj_name = models.CharField(max_length=255, blank=True, null=True, help_text="Gujarati samaj name")
+    logo = models.ImageField(
+        upload_to="samaj_logos/", blank=True, null=True, max_length=512
+    )
+    referral_code = models.CharField(max_length=50, blank=True, null=True, unique=True)
+    is_premium = models.BooleanField(default=False)
+    villages = models.ManyToManyField(
+        Village, related_name="samaj_list", blank=True
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name_plural = "Samaj"
 
 # new model added ended. 
 
@@ -141,6 +163,10 @@ class Person(models.Model):
         Village, on_delete=models.SET_NULL, blank=True, null=True
     )
     # new field added ended. 
+    samaj = models.ForeignKey(
+        Samaj, on_delete=models.SET_NULL, blank=True, null=True, related_name="members"
+    )
+    is_premium = models.BooleanField(default=False)
     out_of_country = models.ForeignKey(Country, on_delete=models.CASCADE, default=1)
     is_out_of_country = models.BooleanField(default=False)
     international_mobile_number = models.CharField(max_length=50, blank=True, null=True)
@@ -197,10 +223,41 @@ class Person(models.Model):
         super(Person, self).delete(*args, **kwargs)
 
     def save(self, *args, **kwargs):
+        # Handle soft delete timestamp
         if self.is_deleted == True:
             self.deleted_at = datetime.now()
         else:
             self.deleted_at = None
+        
+        # Auto-assign default Patel samaj if no samaj is selected
+        if not self.samaj_id and self.village_id:
+            try:
+                # Try to get default Patel samaj linked to this village
+                default_samaj = Samaj.objects.filter(
+                    name__iexact='Patel',
+                    villages__id=self.village_id
+                ).first()
+                
+                if not default_samaj:
+                    # If no Patel samaj for this village, get or create global Patel samaj
+                    default_samaj, _ = Samaj.objects.get_or_create(
+                        name='Patel',
+                        defaults={'guj_name': 'પટેલ', 'is_premium': False}
+                    )
+                    # Link to village
+                    if self.village:
+                        default_samaj.villages.add(self.village)
+                
+                self.samaj = default_samaj
+            except Exception:
+                pass  # If samaj assignment fails, continue without it
+        
+        # Auto-set is_premium based on samaj
+        if self.samaj:
+            self.is_premium = self.samaj.is_premium
+        else:
+            self.is_premium = False
+        
         super(Person, self).save(*args, **kwargs)
 
 

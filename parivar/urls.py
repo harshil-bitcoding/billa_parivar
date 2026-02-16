@@ -227,6 +227,10 @@ urlpatterns = [
         V4Views.TalukaDistrictView.as_view(),
         name="taluka_district",
     ),
+    
+    # Samaj endpoints
+    path("api/v4/samaj", V4Views.SamajListView.as_view(), name="samaj_list_v4"),
+    path("api/v4/samaj-by-village", V4Views.SamajByVillageView.as_view(), name="samaj_by_village_v4"),
 
     path(
         "api/v4/upload-csv",

@@ -14,7 +14,7 @@ import cv2
 import string
 import random
 from ..models import (
-    Person, District, Taluka, Village, State, 
+    Person, District, Taluka, Village, Samaj, State, 
     TranslatePerson, Surname, ParentChildRelation, Country,
     BloodGroup, Banner, AdsSetting, PersonUpdateLog, RandomBanner,
     DemoPerson, DemoParentChildRelation, DemoSurname
@@ -26,7 +26,8 @@ from ..serializers import (
     DistrictSerializer,
     StateSerializer, 
     TalukaSerializer, 
-    VillageSerializer, 
+    VillageSerializer,
+    SamajSerializer,
     PersonV4Serializer,
     SurnameSerializer,
     BloodGroupSerializer,
@@ -116,6 +117,41 @@ class VillageDetailView(APIView):
             taluka__district__is_active=True
         )
         serializer = VillageSerializer(villages, many=True, context={"lang": lang})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class SamajListView(APIView):
+    """Returns all samaj."""
+    @swagger_auto_schema(
+        operation_description="Get all samaj",
+        manual_parameters=[
+            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING)
+        ],
+        responses={200: openapi.Response(description="Samaj list", schema=SamajSerializer(many=True))}
+    )
+    def get(self, request):
+        lang = request.GET.get("lang", "en")
+        samaj = Samaj.objects.all().order_by('name')
+        serializer = SamajSerializer(samaj, many=True, context={"lang": lang})
+        return Response(serializer.data, status=status.HTTP_200_OK)
+
+class SamajByVillageView(APIView):
+    """Returns samaj present in a specific village."""
+    @swagger_auto_schema(
+        operation_description="Get samaj in a specific village",
+        manual_parameters=[
+            openapi.Parameter('village_id', openapi.IN_QUERY, description="Village ID", type=openapi.TYPE_INTEGER, required=True),
+            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING)
+        ],
+        responses={200: openapi.Response(description="Samaj list", schema=SamajSerializer(many=True)), 400: "Village ID is required"}
+    )
+    def get(self, request):
+        village_id = request.GET.get("village_id")
+        if not village_id:
+            return Response({"error": "Village ID is required"}, status=status.HTTP_400_BAD_REQUEST)
+        
+        lang = request.GET.get("lang", "en")
+        samaj = Samaj.objects.filter(villages__id=village_id).order_by('name')
+        serializer = SamajSerializer(samaj, many=True, context={"lang": lang})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
 class SurnameByVillageView(APIView):
@@ -326,10 +362,15 @@ class V4LoginAPI(APIView):
         
         admin_data["person"] = serializer.data
         
-        # Add referral code for non-demo users
+        # Add samaj data and referral code
         admin_data["referral_code"] = ""
-        if person.village and hasattr(person.village, 'referral_code') and person.village.referral_code:
-            admin_data["referral_code"] = person.village.referral_code
+        admin_data["samaj_list"] = []
+        if person.village:
+            samaj_in_village = person.village.samaj_list.all()
+            admin_data["samaj_list"] = SamajSerializer(samaj_in_village, many=True, context={"lang": lang}).data
+            # Return first samaj referral code for backward compatibility
+            if samaj_in_village.exists() and samaj_in_village.first().referral_code:
+                admin_data["referral_code"] = samaj_in_village.first().referral_code
         
         admin_user_id = serializer.data.get("id")
         if admin_user_id:

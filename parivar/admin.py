@@ -340,10 +340,37 @@ class TalukaAdmin(admin.ModelAdmin):
     list_filter = ["district"]
     search_fields = ["name", "guj_name"]
 
+
+@admin.register(Samaj)
+class SamajAdmin(admin.ModelAdmin):
+    list_display = ['id', 'name', 'guj_name', 'referral_code', 'is_premium', 'get_villages_display', 'village_count', 'created_at']
+    search_fields = ['name', 'guj_name', 'referral_code', 'villages__name']
+    list_filter = ['is_premium', 'created_at', 'villages']
+    filter_horizontal = ['villages']
+    readonly_fields = ['created_at', 'updated_at']
+    
+    def get_villages_display(self, obj):
+        """Display village names (max 3, then show count)"""
+        villages = obj.villages.all()[:3]
+        village_names = [v.name for v in villages]
+        total_count = obj.villages.count()
+        
+        if total_count > 3:
+            return f"{', '.join(village_names)}... (+{total_count - 3} more)"
+        return ', '.join(village_names) if village_names else '-'
+    
+    get_villages_display.short_description = 'Villages'
+    
+    def village_count(self, obj):
+        """Display total village count"""
+        return obj.villages.count()
+    
+    village_count.short_description = 'Total Villages'
+
 @admin.register(Village)
 class VillageAdmin(admin.ModelAdmin):
-    list_display = ["id", "name", "guj_name", "get_district", "taluka","referral_code", "is_active", "view_invitation_link"]
-    list_filter = ["taluka__district", "taluka","referral_code", "is_active"]
+    list_display = ["id", "name", "guj_name", "get_district", "taluka", "is_active", "view_invitation_link"]
+    list_filter = ["taluka__district", "taluka", "is_active"]
     readonly_fields = ["view_invitation_link"]
 
     def get_district(self, obj):
