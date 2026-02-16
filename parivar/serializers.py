@@ -97,7 +97,7 @@ class SamajSerializer(serializers.ModelSerializer):
     
     class Meta:
         model = Samaj
-        fields = ['id', 'name', 'guj_name', 'logo', 'referral_code', 'is_premium']
+        fields = ['id', 'name', 'guj_name', 'logo', 'referral_code', 'is_premium', 'village']
     
     def to_representation(self, instance):
         data = super().to_representation(instance)

@@ -150,7 +150,7 @@ class SamajByVillageView(APIView):
             return Response({"error": "Village ID is required"}, status=status.HTTP_400_BAD_REQUEST)
         
         lang = request.GET.get("lang", "en")
-        samaj = Samaj.objects.filter(villages__id=village_id).order_by('name')
+        samaj = Samaj.objects.filter(village__id=village_id).order_by('name')
         serializer = SamajSerializer(samaj, many=True, context={"lang": lang})
         return Response(serializer.data, status=status.HTTP_200_OK)
 
@@ -160,7 +160,8 @@ class SurnameByVillageView(APIView):
         operation_description="Get surnames present in a specific village",
         manual_parameters=[
             openapi.Parameter('village_id', openapi.IN_QUERY, description="ID of the village", type=openapi.TYPE_INTEGER, required=True),
-            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING)
+            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING),
+            openapi.Parameter('samaj_id', openapi.IN_QUERY, description="Optional Samaj ID filter", type=openapi.TYPE_INTEGER)
         ],
         responses={200: openapi.Response(description="Surnames list", schema=SurnameSerializer(many=True)), 400: "Village ID is required"}
     )
@@ -178,13 +179,16 @@ class SurnameByVillageView(APIView):
         except Village.DoesNotExist:
             return Response({'error': 'Village not found'}, status=status.HTTP_404_NOT_FOUND)
             
-        # Get unique surname IDs for members in this village
+        # Get unique surname IDs for members in this village/samaj
         is_demo = request.GET.get("is_demo") == "true"
         person_model = DemoPerson if is_demo else Person
+        samaj_id = request.GET.get("samaj_id")
         
-        surname_ids = person_model.objects.filter(
-            village_id=village_id, is_deleted=False, flag_show=True
-        ).values_list('surname_id', flat=True).distinct()
+        person_filter = Q(village_id=village_id, is_deleted=False, flag_show=True)
+        if samaj_id:
+            person_filter &= Q(samaj_id=samaj_id)
+            
+        surname_ids = person_model.objects.filter(person_filter).values_list('surname_id', flat=True).distinct()
         
         surnames = Surname.objects.filter(id__in=surname_ids).order_by('name')
         serializer = SurnameSerializer(surnames, many=True, context={"lang": lang})
@@ -195,7 +199,8 @@ class AdditionalDataByVillageView(APIView):
     @swagger_auto_schema(
         operation_description="Get statistics for a specific village",
         manual_parameters=[
-            openapi.Parameter('village_id', openapi.IN_QUERY, description="ID of the village", type=openapi.TYPE_INTEGER, required=True)
+            openapi.Parameter('village_id', openapi.IN_QUERY, description="ID of the village", type=openapi.TYPE_INTEGER, required=True),
+            openapi.Parameter('samaj_id', openapi.IN_QUERY, description="Optional Samaj ID filter", type=openapi.TYPE_INTEGER)
         ],
         responses={200: openapi.Response(
             description="Village statistics",
@@ -221,13 +226,17 @@ class AdditionalDataByVillageView(APIView):
             
         is_demo = request.GET.get("is_demo") == "true"
         person_model = DemoPerson if is_demo else Person
+        samaj_id = request.GET.get("samaj_id")
         
         persons = person_model.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
-        total_members = persons.count()
+        if samaj_id:
+            persons = persons.filter(samaj_id=samaj_id)
         
+        total_members = persons.count()
         return Response({
-            "total_member": total_members,
-            "village_id": village_id
+            "total_members": total_members,
+            "village_id": village_id,
+            "samaj_id": samaj_id
         }, status=status.HTTP_200_OK)
 
 class PersonByVillageView(APIView):
@@ -237,7 +246,8 @@ class PersonByVillageView(APIView):
             openapi.Parameter('village_id', openapi.IN_QUERY, description="ID of the village", type=openapi.TYPE_INTEGER, required=True),
             openapi.Parameter('surname_id', openapi.IN_QUERY, description="Optional surname ID filter", type=openapi.TYPE_INTEGER),
             openapi.Parameter('search', openapi.IN_QUERY, description="Optional search keywords", type=openapi.TYPE_STRING),
-            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING)
+            openapi.Parameter('lang', openapi.IN_QUERY, description="Language (en/guj)", type=openapi.TYPE_STRING),
+            openapi.Parameter('samaj_id', openapi.IN_QUERY, description="Optional Samaj ID filter", type=openapi.TYPE_INTEGER)
         ],
         responses={200: openapi.Response(description="Persons list", schema=PersonV4Serializer(many=True)), 400: "Village ID is required"}
     )
@@ -245,11 +255,18 @@ class PersonByVillageView(APIView):
         lang = request.GET.get("lang", "en")
         village_id = request.GET.get("village_id")
         surname_id = request.GET.get("surname_id")
+        samaj_id = request.GET.get("samaj_id")
         
         is_demo = request.GET.get("is_demo") == "true"
         person_model = DemoPerson if is_demo else Person
         
-        persons = person_model.objects.filter(village_id=village_id, is_deleted=False, flag_show=True)
+        persons = person_model.objects.filter(is_deleted=False, flag_show=True)
+        
+        if village_id:
+            persons = persons.filter(village_id=village_id)
+            
+        if samaj_id:
+            persons = persons.filter(samaj_id=samaj_id)
         
         if surname_id:
             persons = persons.filter(surname_id=surname_id)
@@ -368,8 +385,12 @@ class V4LoginAPI(APIView):
         if person.village:
             samaj_in_village = person.village.samaj_list.all()
             admin_data["samaj_list"] = SamajSerializer(samaj_in_village, many=True, context={"lang": lang}).data
-            # Return first samaj referral code for backward compatibility
-            if samaj_in_village.exists() and samaj_in_village.first().referral_code:
+            
+            # Prioritize the person's own samaj referral code
+            if person.samaj and person.samaj.referral_code:
+                admin_data["referral_code"] = person.samaj.referral_code
+            # Fallback to first samaj in village for backward compatibility
+            elif samaj_in_village.exists() and samaj_in_village.first().referral_code:
                 admin_data["referral_code"] = samaj_in_village.first().referral_code
         
         admin_user_id = serializer.data.get("id")
@@ -446,10 +467,11 @@ class PendingApproveDetailViewV4(APIView):
         if admin_person.is_super_admin:
             pending_users = Person.objects.filter(flag_show=False, is_deleted=False)
         else:
-            # Filter by village and surname for village admin
+            # Filter by village, samaj and surname for village/samaj admin
             pending_users = Person.objects.filter(
                 flag_show=False, 
                 village=admin_person.village, 
+                samaj=admin_person.samaj,
                 surname=admin_person.surname,
                 is_deleted=False
             ).exclude(id=admin_person.surname.top_member if admin_person.surname else None)

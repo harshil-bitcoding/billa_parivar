@@ -265,3 +265,5 @@ urlpatterns = [
     path("api/v4/random-banner", V4Views.V4RandomBannerView.as_view(), name="random_banner_v4"),
     path("api/v4/first-capital", V4Views.V4FirstCapitalize.as_view(), name="first_capital_v4"),
 ]
+
+# village, login, 

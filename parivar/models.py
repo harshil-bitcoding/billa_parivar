@@ -124,17 +124,18 @@ class Samaj(models.Model):
     )
     referral_code = models.CharField(max_length=50, blank=True, null=True, unique=True)
     is_premium = models.BooleanField(default=False)
-    villages = models.ManyToManyField(
-        Village, related_name="samaj_list", blank=True
+    village = models.ForeignKey(
+        Village, related_name="samaj_list", on_delete=models.CASCADE, null=True, blank=True
     )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 
     def __str__(self):
-        return self.name
+        return f"{self.name} - {self.village.name if self.village else 'No Village'}"
 
     class Meta:
         verbose_name_plural = "Samaj"
+        unique_together = ("name", "village")
 
 # new model added ended. 
 
@@ -232,22 +233,12 @@ class Person(models.Model):
         # Auto-assign default Patel samaj if no samaj is selected
         if not self.samaj_id and self.village_id:
             try:
-                # Try to get default Patel samaj linked to this village
-                default_samaj = Samaj.objects.filter(
-                    name__iexact='Patel',
-                    villages__id=self.village_id
-                ).first()
-                
-                if not default_samaj:
-                    # If no Patel samaj for this village, get or create global Patel samaj
-                    default_samaj, _ = Samaj.objects.get_or_create(
-                        name='Patel',
-                        defaults={'guj_name': 'પટેલ', 'is_premium': False}
-                    )
-                    # Link to village
-                    if self.village:
-                        default_samaj.villages.add(self.village)
-                
+                # Get or create Patel samaj for THIS SPECIFIC village
+                default_samaj, _ = Samaj.objects.get_or_create(
+                    name='Patel',
+                    village=self.village,
+                    defaults={'guj_name': 'પટેલ', 'is_premium': False}
+                )
                 self.samaj = default_samaj
             except Exception:
                 pass  # If samaj assignment fails, continue without it
